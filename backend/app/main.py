@@ -5,6 +5,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import (
+    entries_router,
+    fetch_router,
+    horses_router,
+    jockeys_router,
+    model_router,
+    predictions_router,
+    races_router,
+)
 from app.config import get_settings
 from app.database import init_db
 
@@ -52,3 +61,13 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# Register API routers
+app.include_router(races_router, prefix="/api")
+app.include_router(horses_router, prefix="/api")
+app.include_router(jockeys_router, prefix="/api")
+app.include_router(entries_router, prefix="/api")
+app.include_router(predictions_router, prefix="/api")
+app.include_router(fetch_router, prefix="/api")
+app.include_router(model_router, prefix="/api")
