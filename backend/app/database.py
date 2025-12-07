@@ -64,5 +64,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database tables."""
+    # Import models to ensure they are registered with Base.metadata
+    from app.models import Horse, Jockey, Prediction, Race, RaceEntry, RaceResult  # noqa: F401
+
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
