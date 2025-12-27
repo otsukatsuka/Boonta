@@ -208,3 +208,11 @@ __marimo__/
 
 design.md
 FRONTEND_HANDOVER.md
+
+# ML Training data and models
+backend/data/training/
+backend/models/place_predictor/
+
+# SQLite database
+backend/data/*.db
+backend/data/*.db-journal

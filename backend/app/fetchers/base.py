@@ -58,6 +58,19 @@ class ResultInfo:
     jockey_name: str | None = None
     weight: float | None = None
     track_condition: str | None = None
+    corner_positions: list[int] | None = None  # コーナー通過順
+    popularity: int | None = None
+
+
+@dataclass
+class OddsInfo:
+    """Odds information for a race entry."""
+
+    horse_number: int
+    odds: float
+    popularity: int
+    corner_positions: list[int] | None = None  # コーナー通過順
+    running_style: str | None = None  # 推定脚質
 
 
 class DataFetcher(ABC):
