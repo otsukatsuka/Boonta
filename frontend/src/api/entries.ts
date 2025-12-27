@@ -10,6 +10,17 @@ import type {
   CommentUpdate,
 } from '../types';
 
+export interface FetchResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    updated?: number;
+    matched?: number;
+    total_fetched?: number;
+    total_entries?: number;
+  };
+}
+
 export const entriesApi = {
   // Get all entries for a race
   getByRace: async (raceId: number): Promise<EntryListResponse> => {
@@ -38,6 +49,22 @@ export const entriesApi = {
   // Update trainer comment
   updateComment: async (entryId: number, data: CommentUpdate): Promise<Entry> => {
     const response = await apiClient.put(`/entries/${entryId}/comment`, data);
+    return response.data;
+  },
+
+  // Fetch odds from netkeiba shutuba page (pre-race) and update entries
+  fetchShutubaOdds: async (raceId: number, netkeibaRaceId: string): Promise<FetchResponse> => {
+    const response = await apiClient.post(`/fetch/shutuba-odds/${raceId}`, {
+      netkeiba_race_id: netkeibaRaceId,
+    });
+    return response.data;
+  },
+
+  // Fetch odds from netkeiba result page (post-race) and update entries
+  fetchResultOdds: async (raceId: number, netkeibaRaceId: string): Promise<FetchResponse> => {
+    const response = await apiClient.post(`/fetch/odds/${raceId}`, {
+      netkeiba_race_id: netkeibaRaceId,
+    });
     return response.data;
   },
 };

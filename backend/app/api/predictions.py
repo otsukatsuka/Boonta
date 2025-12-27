@@ -9,7 +9,9 @@ from app.schemas import (
     PredictionHistoryResponse,
     PredictionResponse,
 )
+from app.schemas.simulation import RaceSimulation
 from app.services import PredictionService
+from app.services.simulation_service import SimulationService
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -64,3 +66,16 @@ async def get_prediction_history(
     ]
 
     return PredictionHistoryListResponse(items=items, total=len(items))
+
+
+@router.get("/{race_id}/simulation", response_model=RaceSimulation)
+async def get_race_simulation(
+    race_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get race simulation data for visualization."""
+    service = SimulationService(db)
+    simulation = await service.generate_simulation(race_id)
+    if not simulation:
+        raise HTTPException(status_code=404, detail="Race not found or no entries")
+    return simulation

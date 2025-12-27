@@ -7,6 +7,7 @@ import type {
   ModelStatus,
   FeatureImportance,
 } from '../types';
+import type { RaceSimulation } from '../types/simulation';
 
 export const predictionsApi = {
   // Create new prediction for a race
@@ -29,6 +30,12 @@ export const predictionsApi = {
     const response = await apiClient.get(`/predictions/${raceId}/history`, {
       params: { limit },
     });
+    return response.data;
+  },
+
+  // Get race simulation for visualization
+  getSimulation: async (raceId: number): Promise<RaceSimulation> => {
+    const response = await apiClient.get(`/predictions/${raceId}/simulation`);
     return response.data;
   },
 };
