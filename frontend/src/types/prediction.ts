@@ -53,6 +53,15 @@ export interface WideBet {
   amount_per_ticket: number;
 }
 
+export interface HighRiskBet {
+  bet_type: string;
+  horses: number[];
+  expected_return: number;
+  risk_level: 'medium' | 'high' | 'very_high';
+  reason: string;
+  amount: number;
+}
+
 export interface BetRecommendation {
   trifecta: TrifectaBet | null;
   trio: TrioBet | null;
@@ -60,6 +69,7 @@ export interface BetRecommendation {
   wide: WideBet | null;
   total_investment: number;
   note: string | null;
+  high_risk_bets: HighRiskBet[] | null;
 }
 
 export interface PredictionResponse {
@@ -114,4 +124,17 @@ export const PACE_COLORS: Record<PacePrediction['type'], string> = {
   slow: '#22c55e',
   middle: '#eab308',
   high: '#ef4444',
+};
+
+// Risk level labels and colors
+export const RISK_LABELS: Record<HighRiskBet['risk_level'], string> = {
+  medium: '中リスク',
+  high: '高リスク',
+  very_high: '超高リスク',
+};
+
+export const RISK_COLORS: Record<HighRiskBet['risk_level'], string> = {
+  medium: 'bg-yellow-100 text-yellow-800',
+  high: 'bg-orange-100 text-orange-800',
+  very_high: 'bg-red-100 text-red-800',
 };
