@@ -1,4 +1,5 @@
-import type { BetRecommendation as BetRecommendationType } from '../../types';
+import type { BetRecommendation as BetRecommendationType, HighRiskBet } from '../../types';
+import { RISK_LABELS, RISK_COLORS } from '../../types';
 
 interface BetRecommendationProps {
   bets: BetRecommendationType;
@@ -90,6 +91,91 @@ export function BetRecommendation({ bets }: BetRecommendationProps) {
           </span>
         </div>
       </div>
+
+      {/* High Risk Bets Section */}
+      {bets.high_risk_bets && bets.high_risk_bets.length > 0 && (
+        <HighRiskBetsSection bets={bets.high_risk_bets} />
+      )}
+    </div>
+  );
+}
+
+interface HighRiskBetsSectionProps {
+  bets: HighRiskBet[];
+}
+
+function HighRiskBetsSection({ bets }: HighRiskBetsSectionProps) {
+  const totalHighRiskInvestment = bets.reduce((sum, b) => sum + b.amount, 0);
+
+  return (
+    <div className="mt-6 pt-4 border-t-2 border-red-200">
+      <div className="flex items-center gap-2 mb-4">
+        <h4 className="text-lg font-semibold text-red-700">ハイリスク・ハイリターン</h4>
+        <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">穴馬中心</span>
+      </div>
+
+      <p className="text-xs text-gray-500 mb-4">
+        展開と適性を考慮した穴馬中心の高配当狙い。期待リターン順に表示。
+      </p>
+
+      <div className="space-y-3">
+        {bets.map((bet, index) => (
+          <HighRiskBetCard key={index} bet={bet} rank={index + 1} />
+        ))}
+      </div>
+
+      <div className="mt-4 p-3 bg-red-50 rounded-lg">
+        <div className="flex justify-between items-center">
+          <span className="text-sm font-medium text-red-700">ハイリスク投資額</span>
+          <span className="text-lg font-bold text-red-700">
+            ¥{totalHighRiskInvestment.toLocaleString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface HighRiskBetCardProps {
+  bet: HighRiskBet;
+  rank: number;
+}
+
+function HighRiskBetCard({ bet, rank }: HighRiskBetCardProps) {
+  return (
+    <div className="border border-red-200 rounded-lg p-3 bg-white hover:bg-red-50 transition-colors">
+      <div className="flex justify-between items-start mb-2">
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-6 flex items-center justify-center bg-red-600 text-white text-xs font-bold rounded-full">
+            {rank}
+          </span>
+          <span className="font-semibold text-gray-900">{bet.bet_type}</span>
+          <span className={`text-xs px-2 py-0.5 rounded ${RISK_COLORS[bet.risk_level]}`}>
+            {RISK_LABELS[bet.risk_level]}
+          </span>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-500">期待リターン</div>
+          <div className="font-bold text-red-600">{bet.expected_return.toFixed(1)}倍</div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-sm text-gray-600">馬番:</span>
+        <div className="flex gap-1">
+          {bet.horses.map((num) => (
+            <span
+              key={num}
+              className="inline-flex items-center justify-center w-6 h-6 bg-gray-800 text-white text-xs font-bold rounded"
+            >
+              {num}
+            </span>
+          ))}
+        </div>
+        <span className="text-sm text-gray-500 ml-auto">¥{bet.amount}</span>
+      </div>
+
+      <p className="text-xs text-gray-600 bg-gray-50 p-2 rounded">{bet.reason}</p>
     </div>
   );
 }

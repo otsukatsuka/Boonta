@@ -138,9 +138,9 @@ export function RaceDetail() {
               )}
             </div>
             {prediction.reasoning && (
-              <p className="mt-4 p-3 bg-gray-50 rounded-lg text-gray-700">
+              <div className="mt-4 p-4 bg-gray-50 rounded-lg text-gray-700 text-sm whitespace-pre-line leading-relaxed">
                 {prediction.reasoning}
-              </p>
+              </div>
             )}
           </div>
 
