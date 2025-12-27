@@ -1,17 +1,23 @@
 """Race schemas."""
 
-from datetime import date
+from __future__ import annotations
+
+import datetime
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
 from app.schemas.common import BaseSchema, TimestampSchema
+
+if TYPE_CHECKING:
+    from app.schemas.entry import EntryResponse
 
 
 class RaceBase(BaseSchema):
     """Base race schema."""
 
     name: str = Field(..., min_length=1, max_length=100, description="レース名")
-    date: date = Field(..., description="開催日")
+    date: datetime.date = Field(..., description="開催日")
     venue: str = Field(..., min_length=1, max_length=20, description="競馬場")
     course_type: str = Field(..., min_length=1, max_length=10, description="芝/ダート")
     distance: int = Field(..., ge=800, le=4000, description="距離(m)")
@@ -31,7 +37,7 @@ class RaceUpdate(BaseSchema):
     """Schema for updating a race."""
 
     name: str | None = Field(None, min_length=1, max_length=100)
-    date: date | None = None
+    date: datetime.date | None = None
     venue: str | None = Field(None, min_length=1, max_length=20)
     course_type: str | None = Field(None, min_length=1, max_length=10)
     distance: int | None = Field(None, ge=800, le=4000)
@@ -57,7 +63,5 @@ class RaceListResponse(BaseSchema):
 
 class RaceDetailResponse(RaceResponse):
     """Race detail response with entries."""
-
-    from app.schemas.entry import EntryResponse
 
     entries: list[EntryResponse] = Field(default_factory=list)

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # ML Model
     model_path: Path = Path("models")
-    model_version: str = "v1.0.0"
+    model_version: str = "v2.0.0-ml"  # AutoGluon ML model integrated
 
     # Scraping
     scraping_delay: float = 1.0  # seconds between requests
