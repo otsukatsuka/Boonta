@@ -1,17 +1,39 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useRace, useRaceEntries, usePrediction, useCreatePrediction } from '../hooks';
+import { useRace, useRaceEntries, usePrediction, useCreatePrediction, useSimulation, useFetchShutubaOdds } from '../hooks';
 import { PageLoading, ErrorMessage, GradeBadge, CourseTypeBadge } from '../components/common';
 import { EntryTable } from '../components/race';
 import { RankingTable, PacePreview, BetRecommendation } from '../components/prediction';
+import { RaceSimulationView } from '../components/simulation';
 
 export function RaceDetail() {
   const { raceId } = useParams<{ raceId: string }>();
   const id = parseInt(raceId || '0', 10);
+  const [netkeibaRaceId, setNetkeibaRaceId] = useState('');
+  const [showFetchForm, setShowFetchForm] = useState(false);
 
   const { data: race, isLoading: raceLoading, error: raceError } = useRace(id);
   const { data: entriesData, isLoading: entriesLoading } = useRaceEntries(id);
   const { data: prediction, isLoading: predictionLoading } = usePrediction(id);
+  const { data: simulation, isLoading: simulationLoading } = useSimulation(id);
   const createPrediction = useCreatePrediction();
+  const fetchShutubaOdds = useFetchShutubaOdds();
+
+  const handleFetchOdds = async () => {
+    if (!netkeibaRaceId.trim()) return;
+    try {
+      const result = await fetchShutubaOdds.mutateAsync({
+        raceId: id,
+        netkeibaRaceId: netkeibaRaceId.trim(),
+      });
+      alert(`${result.message}\n更新: ${result.data?.updated || 0}頭`);
+      setShowFetchForm(false);
+      setNetkeibaRaceId('');
+    } catch (error) {
+      console.error('Fetch odds failed:', error);
+      alert('オッズ取得に失敗しました');
+    }
+  };
 
   if (raceLoading || entriesLoading) {
     return <PageLoading />;
@@ -129,16 +151,77 @@ export function RaceDetail() {
         </div>
       )}
 
+      {/* Race Simulation */}
+      {simulationLoading ? (
+        <div className="card text-center py-8 text-gray-500">
+          シミュレーションデータを読み込み中...
+        </div>
+      ) : simulation ? (
+        <div className="card">
+          <RaceSimulationView simulation={simulation} />
+        </div>
+      ) : entriesData && entriesData.items.length > 0 ? (
+        <div className="card text-center py-8 text-gray-500">
+          シミュレーションデータの取得に失敗しました
+        </div>
+      ) : null}
+
       {/* Entry Table */}
       <div className="card">
-        <h2 className="text-lg font-semibold mb-4">
-          出走馬一覧
-          {entriesData && (
-            <span className="ml-2 text-sm font-normal text-gray-500">
-              ({entriesData.total}頭)
-            </span>
-          )}
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">
+            出走馬一覧
+            {entriesData && (
+              <span className="ml-2 text-sm font-normal text-gray-500">
+                ({entriesData.total}頭)
+              </span>
+            )}
+          </h2>
+          <button
+            onClick={() => setShowFetchForm(!showFetchForm)}
+            className="text-sm px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+          >
+            netkeibaから更新
+          </button>
+        </div>
+
+        {/* Netkeiba Fetch Form */}
+        {showFetchForm && (
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <p className="text-sm text-gray-600 mb-2">
+              netkeibaのレースIDを入力してオッズ・人気を一括更新します。
+            </p>
+            <p className="text-xs text-gray-500 mb-3">
+              例: 有馬記念2024の場合 → <code className="bg-gray-200 px-1 rounded">202406050811</code>
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={netkeibaRaceId}
+                onChange={(e) => setNetkeibaRaceId(e.target.value)}
+                placeholder="netkeiba race ID (例: 202406050811)"
+                className="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <button
+                onClick={handleFetchOdds}
+                disabled={fetchShutubaOdds.isPending || !netkeibaRaceId.trim()}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {fetchShutubaOdds.isPending ? '取得中...' : '取得'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowFetchForm(false);
+                  setNetkeibaRaceId('');
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 text-sm"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        )}
+
         {entriesData && entriesData.items.length > 0 ? (
           <EntryTable entries={entriesData.items} />
         ) : (

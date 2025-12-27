@@ -66,3 +66,27 @@ export function useUpdateComment() {
     },
   });
 }
+
+export function useFetchShutubaOdds() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ raceId, netkeibaRaceId }: { raceId: number; netkeibaRaceId: string }) =>
+      entriesApi.fetchShutubaOdds(raceId, netkeibaRaceId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: entryKeys.byRace(variables.raceId) });
+    },
+  });
+}
+
+export function useFetchResultOdds() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ raceId, netkeibaRaceId }: { raceId: number; netkeibaRaceId: string }) =>
+      entriesApi.fetchResultOdds(raceId, netkeibaRaceId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: entryKeys.byRace(variables.raceId) });
+    },
+  });
+}

@@ -73,6 +73,16 @@ class OddsInfo:
     running_style: str | None = None  # 推定脚質
 
 
+@dataclass
+class ShutubaOddsInfo:
+    """Odds and popularity from shutuba (pre-race) page."""
+
+    horse_number: int
+    horse_name: str
+    odds: float | None
+    popularity: int | None
+
+
 class DataFetcher(ABC):
     """Base class for external data fetchers."""
 

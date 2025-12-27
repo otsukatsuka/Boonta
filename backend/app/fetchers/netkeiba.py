@@ -2,10 +2,16 @@
 
 import asyncio
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
-from app.fetchers.base import DataFetcher, EntryInfo, OddsInfo, RaceInfo, ResultInfo
+from app.fetchers.base import DataFetcher, EntryInfo, OddsInfo, RaceInfo, ResultInfo, ShutubaOddsInfo
 
 
 class NetkeibaFetcher(DataFetcher):
@@ -201,12 +207,34 @@ class NetkeibaFetcher(DataFetcher):
                     if trainer_cell:
                         trainer = trainer_cell.get("title", "") or trainer_cell.get_text(strip=True)
 
+                    # Extract odds from Odds cell
+                    odds = None
+                    odds_cell = row.select_one("td.Odds span")
+                    if odds_cell:
+                        odds_text = odds_cell.get_text(strip=True)
+                        try:
+                            odds = float(odds_text)
+                        except ValueError:
+                            pass
+
+                    # Extract popularity from Popular cell
+                    popularity = None
+                    popular_cell = row.select_one("td.Popular span")
+                    if popular_cell:
+                        pop_text = popular_cell.get_text(strip=True)
+                        try:
+                            popularity = int(pop_text)
+                        except ValueError:
+                            pass
+
                     entry = EntryInfo(
                         horse_name=horse_name,
                         horse_number=horse_number,
                         post_position=post_position,
                         jockey_name=jockey_name,
                         weight=weight,
+                        odds=odds,
+                        popularity=popularity,
                         horse_weight=horse_weight,
                         horse_weight_diff=horse_weight_diff,
                         trainer=trainer,
@@ -467,3 +495,111 @@ class NetkeibaFetcher(DataFetcher):
             return "STALKER"
         else:
             return "CLOSER"
+
+    async def fetch_shutuba_odds(self, race_id: str) -> list[ShutubaOddsInfo]:
+        """
+        Fetch odds and popularity from shutuba (pre-race) page using Selenium.
+
+        This method uses Selenium to render JavaScript and get dynamically loaded odds.
+
+        Args:
+            race_id: Netkeiba race ID (e.g., "202406050811")
+
+        Returns:
+            List of ShutubaOddsInfo with odds and popularity
+        """
+        # Run Selenium in a thread pool since it's blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            return await loop.run_in_executor(
+                executor, self._fetch_shutuba_odds_sync, race_id
+            )
+
+    def _fetch_shutuba_odds_sync(self, race_id: str) -> list[ShutubaOddsInfo]:
+        """Synchronous implementation of shutuba odds fetch using Selenium."""
+        import time
+
+        url = f"{self.BASE_URL}/race/shutuba.html?race_id={race_id}"
+        odds_list = []
+
+        # Setup headless Chrome
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument(
+            "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        )
+
+        driver = None
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+
+            print(f"Selenium: Fetching {url}")
+            driver.get(url)
+
+            # Wait for JavaScript to load
+            time.sleep(3)
+
+            # Find horse rows
+            rows = driver.find_elements(By.CSS_SELECTOR, "tr.HorseList")
+            print(f"Selenium: Found {len(rows)} horse rows")
+
+            for row in rows:
+                try:
+                    tds = row.find_elements(By.TAG_NAME, "td")
+                    if len(tds) < 11:
+                        continue
+
+                    # Horse number (index 1)
+                    horse_number_text = tds[1].text.strip()
+                    if not horse_number_text.isdigit():
+                        continue
+                    horse_number = int(horse_number_text)
+
+                    # Horse name (index 3)
+                    horse_name = tds[3].text.strip().split("\n")[0]
+                    if not horse_name:
+                        continue
+
+                    # Odds (index 9)
+                    odds = None
+                    odds_text = tds[9].text.strip()
+                    if odds_text and odds_text != "---.-":
+                        try:
+                            odds = float(odds_text)
+                        except ValueError:
+                            pass
+
+                    # Popularity (index 10)
+                    popularity = None
+                    pop_text = tds[10].text.strip()
+                    if pop_text and pop_text != "**":
+                        try:
+                            popularity = int(pop_text)
+                        except ValueError:
+                            pass
+
+                    odds_list.append(ShutubaOddsInfo(
+                        horse_number=horse_number,
+                        horse_name=horse_name,
+                        odds=odds,
+                        popularity=popularity,
+                    ))
+
+                except Exception as e:
+                    print(f"Error parsing row: {e}")
+                    continue
+
+            print(f"Selenium: Extracted {len(odds_list)} entries")
+
+        except Exception as e:
+            print(f"Selenium error: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
+
+        return odds_list

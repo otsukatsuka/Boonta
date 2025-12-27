@@ -95,6 +95,7 @@ async def fetch_entries(
         entry_repo = EntryRepository(db)
 
         created_count = 0
+        updated_count = 0
 
         for entry_info in entries_info:
             # Get or create horse
@@ -111,6 +112,16 @@ async def fetch_entries(
             # Check if entry already exists
             existing = await entry_repo.get_by_race_and_horse(race_id, horse.id)
             if existing:
+                # Update odds and popularity if available from shutuba page
+                if entry_info.odds is not None or entry_info.popularity is not None:
+                    update_data = {}
+                    if entry_info.odds is not None:
+                        update_data["odds"] = entry_info.odds
+                    if entry_info.popularity is not None:
+                        update_data["popularity"] = entry_info.popularity
+                    if update_data:
+                        await entry_repo.update(existing.id, update_data)
+                        updated_count += 1
                 continue
 
             # Create entry
@@ -130,8 +141,8 @@ async def fetch_entries(
 
         return FetchResponse(
             success=True,
-            message=f"Created {created_count} entries",
-            data={"created": created_count, "total": len(entries_info)},
+            message=f"Created {created_count} entries, updated {updated_count} odds",
+            data={"created": created_count, "updated": updated_count, "total": len(entries_info)},
         )
 
 
@@ -152,6 +163,69 @@ class FetchOddsRequest(BaseModel):
     """Request to fetch odds from result page."""
 
     netkeiba_race_id: str  # netkeiba race ID
+
+
+class FetchShutubaOddsRequest(BaseModel):
+    """Request to fetch odds from shutuba (pre-race) page."""
+
+    netkeiba_race_id: str  # netkeiba race ID
+
+
+@router.post("/shutuba-odds/{race_id}", response_model=FetchResponse)
+async def fetch_shutuba_odds(
+    race_id: int,
+    request: FetchShutubaOddsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch odds and popularity from netkeiba shutuba page and update entries."""
+    race_repo = RaceRepository(db)
+    race = await race_repo.get(race_id)
+
+    if not race:
+        raise HTTPException(status_code=404, detail="Race not found")
+
+    async with NetkeibaFetcher() as fetcher:
+        odds_list = await fetcher.fetch_shutuba_odds(request.netkeiba_race_id)
+
+        if not odds_list:
+            raise HTTPException(
+                status_code=404,
+                detail="No odds data found. Check the netkeiba race ID.",
+            )
+
+        entry_repo = EntryRepository(db)
+        entries = await entry_repo.get_by_race(race_id)
+
+        updated_count = 0
+        matched_count = 0
+        for entry in entries:
+            # Find matching odds info by horse number
+            odds_info = next(
+                (o for o in odds_list if o.horse_number == entry.horse_number),
+                None
+            )
+            if odds_info:
+                matched_count += 1
+                update_data = {}
+                if odds_info.odds is not None:
+                    update_data["odds"] = odds_info.odds
+                if odds_info.popularity is not None:
+                    update_data["popularity"] = odds_info.popularity
+
+                if update_data:
+                    await entry_repo.update(entry.id, update_data)
+                    updated_count += 1
+
+        return FetchResponse(
+            success=True,
+            message=f"Updated {updated_count} entries with odds/popularity",
+            data={
+                "updated": updated_count,
+                "matched": matched_count,
+                "total_fetched": len(odds_list),
+                "total_entries": len(entries),
+            },
+        )
 
 
 @router.post("/odds/{race_id}", response_model=FetchResponse)

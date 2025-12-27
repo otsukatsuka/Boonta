@@ -7,6 +7,7 @@ export const predictionKeys = {
   all: ['predictions'] as const,
   byRace: (raceId: number) => [...predictionKeys.all, 'race', raceId] as const,
   history: (raceId: number) => [...predictionKeys.byRace(raceId), 'history'] as const,
+  simulation: (raceId: number) => [...predictionKeys.byRace(raceId), 'simulation'] as const,
 };
 
 export const modelKeys = {
@@ -41,6 +42,15 @@ export function useCreatePrediction() {
       queryClient.invalidateQueries({ queryKey: predictionKeys.byRace(raceId) });
       queryClient.invalidateQueries({ queryKey: predictionKeys.history(raceId) });
     },
+  });
+}
+
+export function useSimulation(raceId: number) {
+  return useQuery({
+    queryKey: predictionKeys.simulation(raceId),
+    queryFn: () => predictionsApi.getSimulation(raceId),
+    enabled: raceId > 0,
+    retry: false,
   });
 }
 

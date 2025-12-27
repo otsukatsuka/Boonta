@@ -1,5 +1,7 @@
-import type { Entry } from '../../types';
+import { useState } from 'react';
+import type { Entry, EntryUpdate } from '../../types';
 import { RunningStyleBadge, WorkoutBadge } from '../common';
+import { useUpdateEntry } from '../../hooks';
 
 interface EntryTableProps {
   entries: Entry[];
@@ -7,10 +9,52 @@ interface EntryTableProps {
 }
 
 export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editOdds, setEditOdds] = useState('');
+  const [editPopularity, setEditPopularity] = useState('');
+  const updateEntry = useUpdateEntry();
+
   // Sort by horse number
   const sortedEntries = [...entries].sort(
     (a, b) => (a.horse_number || 0) - (b.horse_number || 0)
   );
+
+  const handleEditClick = (entry: Entry, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(entry.id);
+    setEditOdds(entry.odds?.toString() || '');
+    setEditPopularity(entry.popularity?.toString() || '');
+  };
+
+  const handleSave = async (entryId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const data: EntryUpdate = {};
+
+    if (editOdds) {
+      const odds = parseFloat(editOdds);
+      if (!isNaN(odds) && odds >= 1.0) {
+        data.odds = odds;
+      }
+    }
+
+    if (editPopularity) {
+      const popularity = parseInt(editPopularity);
+      if (!isNaN(popularity) && popularity >= 1) {
+        data.popularity = popularity;
+      }
+    }
+
+    if (Object.keys(data).length > 0) {
+      await updateEntry.mutateAsync({ entryId, data });
+    }
+
+    setEditingId(null);
+  };
+
+  const handleCancel = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(null);
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -43,6 +87,9 @@ export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
             </th>
             <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
               人気
+            </th>
+            <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+              編集
             </th>
           </tr>
         </thead>
@@ -103,22 +150,71 @@ export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
                   <span className="text-gray-400">-</span>
                 )}
               </td>
-              <td className="px-3 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                {entry.odds ? `${entry.odds.toFixed(1)}` : '-'}
+              <td className="px-3 py-4 whitespace-nowrap text-sm text-right">
+                {editingId === entry.id ? (
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    value={editOdds}
+                    onChange={(e) => setEditOdds(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-16 px-1 py-0.5 text-right border rounded text-sm"
+                    placeholder="オッズ"
+                  />
+                ) : (
+                  <span className="text-gray-900">
+                    {entry.odds ? `${entry.odds.toFixed(1)}` : '-'}
+                  </span>
+                )}
               </td>
               <td className="px-3 py-4 whitespace-nowrap text-sm text-right">
-                {entry.popularity ? (
+                {editingId === entry.id ? (
+                  <input
+                    type="number"
+                    min="1"
+                    value={editPopularity}
+                    onChange={(e) => setEditPopularity(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-12 px-1 py-0.5 text-right border rounded text-sm"
+                    placeholder="人気"
+                  />
+                ) : (
                   <span
                     className={
-                      entry.popularity <= 3
+                      entry.popularity && entry.popularity <= 3
                         ? 'font-semibold text-primary-600'
                         : 'text-gray-500'
                     }
                   >
-                    {entry.popularity}
+                    {entry.popularity || '-'}
                   </span>
+                )}
+              </td>
+              <td className="px-3 py-4 whitespace-nowrap text-center">
+                {editingId === entry.id ? (
+                  <div className="flex gap-1 justify-center">
+                    <button
+                      onClick={(e) => handleSave(entry.id, e)}
+                      disabled={updateEntry.isPending}
+                      className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                    >
+                      {updateEntry.isPending ? '...' : '保存'}
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      className="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                    >
+                      取消
+                    </button>
+                  </div>
                 ) : (
-                  '-'
+                  <button
+                    onClick={(e) => handleEditClick(entry, e)}
+                    className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+                  >
+                    編集
+                  </button>
                 )}
               </td>
             </tr>
