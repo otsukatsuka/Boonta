@@ -8,10 +8,20 @@ interface EntryTableProps {
   onEntryClick?: (entry: Entry) => void;
 }
 
+const RUNNING_STYLES = [
+  { value: '', label: '-' },
+  { value: 'ESCAPE', label: '逃げ' },
+  { value: 'FRONT', label: '先行' },
+  { value: 'STALKER', label: '差し' },
+  { value: 'CLOSER', label: '追込' },
+  { value: 'VERSATILE', label: '自在' },
+];
+
 export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editOdds, setEditOdds] = useState('');
   const [editPopularity, setEditPopularity] = useState('');
+  const [editRunningStyle, setEditRunningStyle] = useState('');
   const updateEntry = useUpdateEntry();
 
   // Sort by horse number
@@ -24,6 +34,7 @@ export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
     setEditingId(entry.id);
     setEditOdds(entry.odds?.toString() || '');
     setEditPopularity(entry.popularity?.toString() || '');
+    setEditRunningStyle(entry.running_style || '');
   };
 
   const handleSave = async (entryId: number, e: React.MouseEvent) => {
@@ -42,6 +53,10 @@ export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
       if (!isNaN(popularity) && popularity >= 1) {
         data.popularity = popularity;
       }
+    }
+
+    if (editRunningStyle) {
+      data.running_style = editRunningStyle as EntryUpdate['running_style'];
     }
 
     if (Object.keys(data).length > 0) {
@@ -137,7 +152,20 @@ export function EntryTable({ entries, onEntryClick }: EntryTableProps) {
                 {entry.weight || '-'}
               </td>
               <td className="px-3 py-4 whitespace-nowrap">
-                {entry.running_style ? (
+                {editingId === entry.id ? (
+                  <select
+                    value={editRunningStyle}
+                    onChange={(e) => setEditRunningStyle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-1 py-0.5 border rounded text-sm"
+                  >
+                    {RUNNING_STYLES.map((style) => (
+                      <option key={style.value} value={style.value}>
+                        {style.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : entry.running_style ? (
                   <RunningStyleBadge style={entry.running_style} />
                 ) : (
                   <span className="text-gray-400">-</span>

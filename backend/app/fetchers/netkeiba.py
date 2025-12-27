@@ -11,7 +11,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-from app.fetchers.base import DataFetcher, EntryInfo, OddsInfo, RaceInfo, ResultInfo, ShutubaOddsInfo
+from app.fetchers.base import DataFetcher, EntryInfo, HorseRunningStyleInfo, OddsInfo, RaceInfo, ResultInfo, ShutubaOddsInfo
 
 
 class NetkeibaFetcher(DataFetcher):
@@ -603,3 +603,166 @@ class NetkeibaFetcher(DataFetcher):
                 driver.quit()
 
         return odds_list
+
+    async def fetch_running_styles(self, race_id: str) -> list[HorseRunningStyleInfo]:
+        """
+        Fetch running styles for all horses in a race by analyzing past results.
+
+        Uses Selenium to get horse IDs from shutuba page, then fetches each horse's
+        past results to estimate their typical running style.
+
+        Args:
+            race_id: Netkeiba race ID (e.g., "202406050811")
+
+        Returns:
+            List of HorseRunningStyleInfo with estimated running styles
+        """
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            return await loop.run_in_executor(
+                executor, self._fetch_running_styles_sync, race_id
+            )
+
+    def _fetch_running_styles_sync(self, race_id: str) -> list[HorseRunningStyleInfo]:
+        """Synchronous implementation of running style fetch using Selenium."""
+        import time
+
+        url = f"{self.BASE_URL}/race/shutuba.html?race_id={race_id}"
+        results = []
+
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument(
+            "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        )
+
+        driver = None
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+
+            print(f"Selenium: Fetching horse IDs from {url}")
+            driver.get(url)
+            time.sleep(2)
+
+            # Get horse info including netkeiba horse ID
+            rows = driver.find_elements(By.CSS_SELECTOR, "tr.HorseList")
+            horse_data = []
+
+            for row in rows:
+                try:
+                    tds = row.find_elements(By.TAG_NAME, "td")
+                    if len(tds) < 4:
+                        continue
+
+                    # Horse number
+                    horse_number_text = tds[1].text.strip()
+                    if not horse_number_text.isdigit():
+                        continue
+                    horse_number = int(horse_number_text)
+
+                    # Horse name and ID from link
+                    horse_link = row.find_element(By.CSS_SELECTOR, "span.HorseName a")
+                    horse_name = horse_link.text.strip()
+                    href = horse_link.get_attribute("href")
+
+                    # Extract horse ID from URL like /horse/2021104963/
+                    horse_id_match = re.search(r"/horse/(\d+)", href)
+                    if not horse_id_match:
+                        continue
+                    horse_id = horse_id_match.group(1)
+
+                    horse_data.append({
+                        "horse_number": horse_number,
+                        "horse_name": horse_name,
+                        "horse_id": horse_id,
+                    })
+
+                except Exception as e:
+                    print(f"Error getting horse data: {e}")
+                    continue
+
+            print(f"Selenium: Found {len(horse_data)} horses with IDs")
+
+            # Now fetch past results for each horse
+            for horse in horse_data:
+                try:
+                    horse_url = f"{self.DB_URL}/horse/{horse['horse_id']}/"
+                    print(f"Fetching results for {horse['horse_name']}...")
+                    driver.get(horse_url)
+                    time.sleep(1.5)
+
+                    # Find result table
+                    result_rows = driver.find_elements(
+                        By.CSS_SELECTOR, "table.db_h_race_results tr"
+                    )
+
+                    corner_positions_list = []
+                    for result_row in result_rows[:10]:  # Last 10 races
+                        try:
+                            cols = result_row.find_elements(By.TAG_NAME, "td")
+                            if len(cols) < 22:
+                                continue
+
+                            # Corner positions (column 21)
+                            corner_text = cols[21].text.strip()
+                            corners = self._parse_corner_positions(corner_text)
+                            if corners and len(corners) >= 1:
+                                corner_positions_list.append(corners[0])  # 1st corner
+
+                        except Exception:
+                            continue
+
+                    # Calculate average first corner position
+                    if corner_positions_list:
+                        avg_first_corner = sum(corner_positions_list) / len(corner_positions_list)
+                        running_style = self._estimate_running_style_from_avg(avg_first_corner)
+                    else:
+                        avg_first_corner = None
+                        running_style = "VERSATILE"
+
+                    results.append(HorseRunningStyleInfo(
+                        horse_number=horse["horse_number"],
+                        horse_name=horse["horse_name"],
+                        horse_id=horse["horse_id"],
+                        running_style=running_style,
+                        avg_first_corner=avg_first_corner,
+                        race_count=len(corner_positions_list),
+                    ))
+
+                    avg_str = f"{avg_first_corner:.1f}" if avg_first_corner else "N/A"
+                    print(f"  {horse['horse_name']}: {running_style} (avg: {avg_str}, races: {len(corner_positions_list)})")
+
+                except Exception as e:
+                    print(f"Error fetching results for {horse['horse_name']}: {e}")
+                    results.append(HorseRunningStyleInfo(
+                        horse_number=horse["horse_number"],
+                        horse_name=horse["horse_name"],
+                        horse_id=horse["horse_id"],
+                        running_style="VERSATILE",
+                        avg_first_corner=None,
+                        race_count=0,
+                    ))
+
+        except Exception as e:
+            print(f"Selenium error: {e}")
+
+        finally:
+            if driver:
+                driver.quit()
+
+        return results
+
+    def _estimate_running_style_from_avg(self, avg_first_corner: float) -> str:
+        """Estimate running style from average first corner position."""
+        if avg_first_corner <= 2.5:
+            return "ESCAPE"
+        elif avg_first_corner <= 5.5:
+            return "FRONT"
+        elif avg_first_corner <= 10.5:
+            return "STALKER"
+        else:
+            return "CLOSER"

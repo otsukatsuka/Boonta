@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useRace, useRaceEntries, usePrediction, useCreatePrediction, useSimulation, useFetchShutubaOdds } from '../hooks';
+import { useRace, useRaceEntries, usePrediction, useCreatePrediction, useSimulation, useFetchShutubaOdds, useFetchRunningStyles } from '../hooks';
 import { PageLoading, ErrorMessage, GradeBadge, CourseTypeBadge } from '../components/common';
 import { EntryTable } from '../components/race';
 import { RankingTable, PacePreview, BetRecommendation } from '../components/prediction';
@@ -18,6 +18,7 @@ export function RaceDetail() {
   const { data: simulation, isLoading: simulationLoading } = useSimulation(id);
   const createPrediction = useCreatePrediction();
   const fetchShutubaOdds = useFetchShutubaOdds();
+  const fetchRunningStyles = useFetchRunningStyles();
 
   const handleFetchOdds = async () => {
     if (!netkeibaRaceId.trim()) return;
@@ -32,6 +33,20 @@ export function RaceDetail() {
     } catch (error) {
       console.error('Fetch odds failed:', error);
       alert('オッズ取得に失敗しました');
+    }
+  };
+
+  const handleFetchRunningStyles = async () => {
+    if (!netkeibaRaceId.trim()) return;
+    try {
+      const result = await fetchRunningStyles.mutateAsync({
+        raceId: id,
+        netkeibaRaceId: netkeibaRaceId.trim(),
+      });
+      alert(`${result.message}\n更新: ${result.data?.updated || 0}頭`);
+    } catch (error) {
+      console.error('Fetch running styles failed:', error);
+      alert('脚質取得に失敗しました');
     }
   };
 
@@ -189,26 +204,19 @@ export function RaceDetail() {
         {showFetchForm && (
           <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <p className="text-sm text-gray-600 mb-2">
-              netkeibaのレースIDを入力してオッズ・人気を一括更新します。
+              netkeibaのレースIDを入力してデータを一括更新します。
             </p>
             <p className="text-xs text-gray-500 mb-3">
-              例: 有馬記念2024の場合 → <code className="bg-gray-200 px-1 rounded">202406050811</code>
+              例: 有馬記念2025の場合 → <code className="bg-gray-200 px-1 rounded">202506050811</code>
             </p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 mb-3">
               <input
                 type="text"
                 value={netkeibaRaceId}
                 onChange={(e) => setNetkeibaRaceId(e.target.value)}
-                placeholder="netkeiba race ID (例: 202406050811)"
+                placeholder="netkeiba race ID (例: 202506050811)"
                 className="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
-              <button
-                onClick={handleFetchOdds}
-                disabled={fetchShutubaOdds.isPending || !netkeibaRaceId.trim()}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-              >
-                {fetchShutubaOdds.isPending ? '取得中...' : '取得'}
-              </button>
               <button
                 onClick={() => {
                   setShowFetchForm(false);
@@ -219,6 +227,25 @@ export function RaceDetail() {
                 閉じる
               </button>
             </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleFetchOdds}
+                disabled={fetchShutubaOdds.isPending || !netkeibaRaceId.trim()}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {fetchShutubaOdds.isPending ? '取得中...' : 'オッズ・人気を取得'}
+              </button>
+              <button
+                onClick={handleFetchRunningStyles}
+                disabled={fetchRunningStyles.isPending || !netkeibaRaceId.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {fetchRunningStyles.isPending ? '取得中...' : '脚質を取得'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              ※脚質取得は各馬の過去成績を分析するため、時間がかかります（約30秒）
+            </p>
           </div>
         )}
 
