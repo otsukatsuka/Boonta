@@ -83,6 +83,18 @@ class ShutubaOddsInfo:
     popularity: int | None
 
 
+@dataclass
+class HorseRunningStyleInfo:
+    """Running style info estimated from past races."""
+
+    horse_number: int
+    horse_name: str
+    horse_id: str  # netkeiba horse ID
+    running_style: str  # ESCAPE, FRONT, STALKER, CLOSER, VERSATILE
+    avg_first_corner: float | None  # 平均1角位置
+    race_count: int  # 分析レース数
+
+
 class DataFetcher(ABC):
     """Base class for external data fetchers."""
 

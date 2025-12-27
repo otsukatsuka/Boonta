@@ -90,3 +90,15 @@ export function useFetchResultOdds() {
     },
   });
 }
+
+export function useFetchRunningStyles() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ raceId, netkeibaRaceId }: { raceId: number; netkeibaRaceId: string }) =>
+      entriesApi.fetchRunningStyles(raceId, netkeibaRaceId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: entryKeys.byRace(variables.raceId) });
+    },
+  });
+}

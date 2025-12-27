@@ -228,6 +228,61 @@ async def fetch_shutuba_odds(
         )
 
 
+class FetchRunningStylesRequest(BaseModel):
+    """Request to fetch running styles from horse past results."""
+
+    netkeiba_race_id: str  # netkeiba race ID
+
+
+@router.post("/running-styles/{race_id}", response_model=FetchResponse)
+async def fetch_running_styles(
+    race_id: int,
+    request: FetchRunningStylesRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch running styles from netkeiba horse pages and update entries."""
+    race_repo = RaceRepository(db)
+    race = await race_repo.get(race_id)
+
+    if not race:
+        raise HTTPException(status_code=404, detail="Race not found")
+
+    async with NetkeibaFetcher() as fetcher:
+        style_list = await fetcher.fetch_running_styles(request.netkeiba_race_id)
+
+        if not style_list:
+            raise HTTPException(
+                status_code=404,
+                detail="No running style data found. Check the netkeiba race ID.",
+            )
+
+        entry_repo = EntryRepository(db)
+        entries = await entry_repo.get_by_race(race_id)
+
+        updated_count = 0
+        for entry in entries:
+            # Find matching style info by horse number
+            style_info = next(
+                (s for s in style_list if s.horse_number == entry.horse_number),
+                None
+            )
+            if style_info and style_info.running_style:
+                await entry_repo.update(entry.id, {
+                    "running_style": style_info.running_style,
+                })
+                updated_count += 1
+
+        return FetchResponse(
+            success=True,
+            message=f"Updated {updated_count} entries with running styles",
+            data={
+                "updated": updated_count,
+                "total_fetched": len(style_list),
+                "total_entries": len(entries),
+            },
+        )
+
+
 @router.post("/odds/{race_id}", response_model=FetchResponse)
 async def fetch_odds(
     race_id: int,

@@ -67,4 +67,12 @@ export const entriesApi = {
     });
     return response.data;
   },
+
+  // Fetch running styles from netkeiba horse pages and update entries
+  fetchRunningStyles: async (raceId: number, netkeibaRaceId: string): Promise<FetchResponse> => {
+    const response = await apiClient.post(`/fetch/running-styles/${raceId}`, {
+      netkeiba_race_id: netkeibaRaceId,
+    });
+    return response.data;
+  },
 };
