@@ -55,6 +55,15 @@ export interface ScenarioResult {
   description: string;
 }
 
+export interface TrackConditionResult {
+  track_condition: '良' | '稍重' | '重' | '不良';
+  front_advantage: number;
+  rankings: ScenarioRanking[];
+  key_horses: ScenarioKeyHorse[];
+  advantageous_styles: string[];
+  description: string;
+}
+
 export interface AnimationHorse {
   horse_number: number;
   horse_name: string;
@@ -73,9 +82,13 @@ export interface RaceSimulation {
   race_name: string;
   distance: number;
   course_type: string;
+  venue: string | null;
+  track_condition: string | null;
+  venue_description: string | null;
   corner_positions: CornerPositions[];
   start_formation: StartFormation;
   scenarios: ScenarioResult[];
+  track_condition_scenarios: TrackConditionResult[];
   predicted_pace: 'slow' | 'middle' | 'high';
   animation_frames: AnimationFrame[] | null;
 }
