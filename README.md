@@ -1,3 +1,5 @@
+![Backend Tests](https://github.com/s-otsuka/Boonta/actions/workflows/backend-tests.yml/badge.svg)
+
 # Boonta - 競馬予想AI
 
 展開予想を重視した競馬予想アプリケーション。netkeibaからデータを取得し、機械学習モデルと展開分析を組み合わせて予想を行います。

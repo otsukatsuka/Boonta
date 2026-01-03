@@ -91,3 +91,71 @@ SQLite with SQLAlchemy async support. Data stored in `backend/data/boonta.db`. M
 - **Running Styles (脚質)**: ESCAPE(逃げ), FRONT(先行), STALKER(差し), CLOSER(追込), VERSATILE(自在)
 - **Pace Prediction**: Rule-based logic determining race pace (high/middle/slow) based on running style distribution
 - **Bet Recommendations**: Focus on trifecta/trio/exacta with dark horse detection for value betting
+
+## Testing
+
+### Running Tests
+
+```bash
+cd backend
+pytest                              # Run all tests
+pytest tests/unit/ -v               # Unit tests only
+pytest -k "test_pace" -v            # Run specific test pattern
+pytest --cov=app --cov-report=html  # With coverage report
+```
+
+### Test Structure
+
+```
+tests/
+├── conftest.py              # Shared fixtures (db_session, test_race, etc.)
+├── fixtures/
+│   └── factories.py         # Test data factories
+├── unit/
+│   ├── ml/
+│   │   └── test_pace.py     # Pace prediction tests (~45 tests)
+│   ├── services/
+│   │   ├── test_prediction_service.py  # Prediction logic (~39 tests)
+│   │   └── test_feature_service.py     # Feature engineering (~14 tests)
+│   └── repositories/
+│       ├── test_base_repository.py     # CRUD operations (~10 tests)
+│       └── test_race_repository.py     # Race queries (~10 tests)
+└── integration/
+    └── api/                 # API endpoint tests (future)
+```
+
+### Key Test Patterns
+
+- Use `pytest-asyncio` for async tests (asyncio_mode = "auto")
+- In-memory SQLite (`sqlite+aiosqlite:///:memory:`)
+- Mock AutoGluon predictor in CI (returns None)
+- Transaction rollback after each test
+
+### CI/CD
+
+GitHub Actions runs on push/PR to main:
+- Lint (ruff) → Type check (mypy) → Tests (pytest)
+- Python 3.10, 3.11 matrix
+- AutoGluon excluded from CI dependencies (mocked in tests)
+
+## Code Patterns
+
+### Repository Pattern
+
+Repositories extend `BaseRepository[ModelType]`:
+- `get(id)`, `get_all(skip, limit, filters)`, `count()`
+- `create(data)`, `update(id, data)`, `delete(id)`
+- Custom queries in subclasses (e.g., `get_with_entries()`)
+
+### Service Pattern
+
+Services encapsulate business logic:
+- Accept `AsyncSession` in constructor
+- Instantiate repositories internally
+- Return Pydantic schemas or domain objects
+
+### ML Integration
+
+- `get_ml_predictor()` lazy-loads AutoGluon model
+- Returns `None` if model not trained
+- Prediction service handles both ML and rule-based fallback
