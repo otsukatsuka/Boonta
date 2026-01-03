@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import RaceResult
+from app.models import Race, RaceResult
 from app.repositories.base import BaseRepository
 
 
@@ -70,3 +70,47 @@ class ResultRepository(BaseRepository[RaceResult]):
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_by_horse_with_conditions(
+        self,
+        horse_id: int,
+        distance: int | None = None,
+        venue: str | None = None,
+        track_condition: str | None = None,
+        limit: int = 20,
+    ) -> list[RaceResult]:
+        """Get results for a horse with optional condition filters.
+
+        Args:
+            horse_id: Horse ID
+            distance: Target distance (will match ±200m range)
+            venue: Target venue name
+            track_condition: Target track condition (良/稍重/重/不良)
+            limit: Maximum number of results
+        """
+        query = (
+            select(RaceResult)
+            .join(Race, RaceResult.race_id == Race.id)
+            .options(
+                selectinload(RaceResult.race),
+                selectinload(RaceResult.jockey),
+            )
+            .where(RaceResult.horse_id == horse_id)
+        )
+
+        if distance is not None:
+            # Match within ±200m range
+            query = query.where(
+                Race.distance >= distance - 200,
+                Race.distance <= distance + 200,
+            )
+
+        if venue is not None:
+            query = query.where(Race.venue == venue)
+
+        if track_condition is not None:
+            query = query.where(Race.track_condition == track_condition)
+
+        query = query.order_by(RaceResult.id.desc()).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

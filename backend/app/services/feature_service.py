@@ -82,6 +82,43 @@ class FeatureService:
             features["jockey_win_rate"] = entry.jockey.win_rate
             features["jockey_venue_win_rate"] = entry.jockey.venue_win_rate
 
+        # Aptitude features (適性特徴量)
+        race_distance = entry.race.distance if entry.race else None
+        race_venue = entry.race.venue if entry.race else None
+        race_track_condition = entry.race.track_condition if entry.race else None
+
+        # Same distance results (同距離成績 ±200m)
+        if race_distance:
+            same_distance_results = await self.result_repo.get_by_horse_with_conditions(
+                entry.horse_id, distance=race_distance, limit=20
+            )
+            if same_distance_results:
+                positions = [r.position for r in same_distance_results if r.position]
+                if positions:
+                    features["same_distance_win_rate"] = sum(1 for p in positions if p == 1) / len(positions)
+                    features["same_distance_place_rate"] = sum(1 for p in positions if p <= 3) / len(positions)
+
+        # Same venue results (同コース成績)
+        if race_venue:
+            same_venue_results = await self.result_repo.get_by_horse_with_conditions(
+                entry.horse_id, venue=race_venue, limit=20
+            )
+            if same_venue_results:
+                positions = [r.position for r in same_venue_results if r.position]
+                if positions:
+                    features["same_venue_win_rate"] = sum(1 for p in positions if p == 1) / len(positions)
+                    features["same_venue_place_rate"] = sum(1 for p in positions if p <= 3) / len(positions)
+
+        # Same track condition results (同馬場状態成績)
+        if race_track_condition:
+            same_track_results = await self.result_repo.get_by_horse_with_conditions(
+                entry.horse_id, track_condition=race_track_condition, limit=20
+            )
+            if same_track_results:
+                positions = [r.position for r in same_track_results if r.position]
+                if positions:
+                    features["same_track_condition_place_rate"] = sum(1 for p in positions if p <= 3) / len(positions)
+
         return features
 
     async def build_features_for_race(self, race_id: int) -> pd.DataFrame | None:
