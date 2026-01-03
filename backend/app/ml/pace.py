@@ -154,7 +154,6 @@ def predict_pace(
     venue_char = VENUE_CHARACTERISTICS.get(venue or "", {})
     venue_adjustment = venue_char.get("front_advantage", 0.0)
     venue_description = venue_char.get("description", "")
-    venue_shape = venue_char.get("shape", "medium")
 
     track_effect = TRACK_CONDITION_EFFECTS.get(track_condition or "良", {})
     track_adjustment = track_effect.get("front_modifier", 0.0)
