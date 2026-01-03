@@ -1,16 +1,14 @@
 """Prediction service with pace-focused analysis and ML model integration."""
 
 import os
-from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.fetchers.netkeiba import NetkeibaFetcher
 from app.models import Prediction, RaceEntry
 from app.repositories import EntryRepository, PredictionRepository, RaceRepository
 from app.schemas import (
@@ -450,8 +448,8 @@ class PredictionService:
     ) -> float:
         """Calculate score based on pace prediction, venue, track condition, and post position."""
         from app.ml.pace import (
-            VENUE_CHARACTERISTICS,
             TRACK_CONDITION_EFFECTS,
+            VENUE_CHARACTERISTICS,
             calculate_post_position_effect,
         )
 
@@ -847,7 +845,7 @@ class PredictionService:
                 pace_desc += f"逃げ馬が{pace.escape_count}頭と多く、序盤から激しい先行争いが予想される。"
                 pace_desc += "前半から脚を使う展開となれば、後方待機組に展開が向く。"
             else:
-                pace_desc += f"逃げ・先行馬が積極的に動くメンバー構成。"
+                pace_desc += "逃げ・先行馬が積極的に動くメンバー構成。"
                 pace_desc += "差し・追込馬の末脚が活きる展開か。"
         elif pace.type == "slow":
             pace_desc = "スローペース想定。"
@@ -985,7 +983,7 @@ class PredictionService:
                     if dh.odds and dh.odds >= 30:
                         ana_parts.append(f"オッズ{dh.odds:.1f}倍は魅力的")
                     elif dh.odds and dh.odds >= 15:
-                        ana_parts.append(f"オッズ的にも狙い目")
+                        ana_parts.append("オッズ的にも狙い目")
 
                     if ana_parts:
                         lines.append("。".join(ana_parts) + "。")

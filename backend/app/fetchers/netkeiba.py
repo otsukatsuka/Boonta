@@ -11,7 +11,15 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-from app.fetchers.base import DataFetcher, EntryInfo, HorseRunningStyleInfo, OddsInfo, RaceInfo, ResultInfo, ShutubaOddsInfo
+from app.fetchers.base import (
+    DataFetcher,
+    EntryInfo,
+    HorseRunningStyleInfo,
+    OddsInfo,
+    RaceInfo,
+    ResultInfo,
+    ShutubaOddsInfo,
+)
 
 
 class NetkeibaFetcher(DataFetcher):

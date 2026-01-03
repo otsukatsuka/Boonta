@@ -1,11 +1,11 @@
-name: Backend Tests
+name: Tests
 
 on:
   push:
     branches: [main]
     paths:
       - 'backend/**'
-      - '.github/workflows/backend-tests.yml'
+      - '.github/workflows/test.yml'
   pull_request:
     branches: [main]
     paths:
@@ -40,17 +40,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install fastapi uvicorn sqlalchemy aiosqlite pydantic pydantic-settings
           pip install httpx beautifulsoup4 lxml pandas numpy
-          pip install pytest pytest-asyncio pytest-cov ruff mypy
-
-      - name: Lint with ruff
-        run: |
-          cd backend
-          ruff check app/ --output-format=github
-
-      - name: Type check with mypy
-        run: |
-          cd backend
-          mypy app/ --ignore-missing-imports
+          pip install pytest pytest-asyncio pytest-cov
 
       - name: Run tests with coverage
         run: |

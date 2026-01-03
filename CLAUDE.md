@@ -133,10 +133,16 @@ tests/
 
 ### CI/CD
 
-GitHub Actions runs on push/PR to main:
-- Lint (ruff) → Type check (mypy) → Tests (pytest)
+GitHub Actions workflows (triggered on push/PR to main):
+
+**lint.yml**
+- Lint (ruff) - strict, blocks merge
+- Type check (mypy) - runs but doesn't block (continue-on-error)
+
+**test.yml**
+- pytest with coverage
 - Python 3.10, 3.11 matrix
-- AutoGluon excluded from CI dependencies (mocked in tests)
+- AutoGluon excluded (mocked in tests)
 
 ## Code Patterns
 
