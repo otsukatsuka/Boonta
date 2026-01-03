@@ -1,7 +1,6 @@
 """Model API routes."""
 
 import csv
-import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -84,23 +83,33 @@ async def get_feature_importance(
     if not model_path.exists():
         raise HTTPException(status_code=404, detail="Model not trained yet")
 
-    # Return pre-computed feature importance from training
-    # These values were computed during model training
-    return FeatureImportanceResponse(
-        features=[
-            {"name": "上がり3F (last_3f)", "importance": 0.0278},
-            {"name": "対数オッズ (log_odds)", "importance": 0.0225},
-            {"name": "オッズ (odds)", "importance": 0.0177},
-            {"name": "脚質 (running_style)", "importance": 0.0140},
-            {"name": "人気 (popularity)", "importance": 0.0117},
-            {"name": "馬番 (horse_number)", "importance": 0.0103},
-            {"name": "斤量 (weight)", "importance": 0.0066},
-            {"name": "馬体重 (horse_weight)", "importance": 0.0062},
-            {"name": "グレード (grade)", "importance": 0.0053},
-            {"name": "芝/ダート (is_turf)", "importance": 0.0047},
-            {"name": "距離 (distance)", "importance": 0.0046},
-        ]
-    )
+    try:
+        from autogluon.tabular import TabularPredictor
+
+        predictor = TabularPredictor.load(str(model_path))
+        importance_df = predictor.feature_importance()
+
+        # Convert DataFrame to list of dicts
+        features = []
+        for name, row in importance_df.iterrows():
+            importance_value = float(row["importance"]) if "importance" in row else float(row.iloc[0])
+            features.append({"name": str(name), "importance": importance_value})
+
+        # Sort by importance descending
+        features.sort(key=lambda x: float(x["importance"]), reverse=True)
+
+        return FeatureImportanceResponse(features=features)
+
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="AutoGluon not installed. Cannot load model.",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load model or compute feature importance: {str(e)}",
+        )
 
 
 # Training data collection

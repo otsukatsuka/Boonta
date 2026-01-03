@@ -47,6 +47,18 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
         "jockey_venue_win_rate": 0.1,
         "escape_horse_count": 1,
         "front_horse_count": 4,
+        # Post position derived (枠順派生)
+        "is_inner_post": 0,
+        "is_outer_post": 0,
+        # Rotation derived (ローテーション派生)
+        "rest_flag": 0,
+        "short_rotation_flag": 0,
+        # Aptitude (適性) - デフォルトは全体平均的な値
+        "same_distance_win_rate": 0.1,
+        "same_distance_place_rate": 0.3,
+        "same_venue_win_rate": 0.1,
+        "same_venue_place_rate": 0.3,
+        "same_track_condition_place_rate": 0.3,
     }
 
     for col, default in numerical_defaults.items():
@@ -73,6 +85,9 @@ def get_feature_columns() -> list[str]:
         "post_position",
         "horse_number",
         "weight",
+        # Post position derived (枠順派生)
+        "is_inner_post",
+        "is_outer_post",
         # Odds
         "odds",
         "popularity",
@@ -87,6 +102,15 @@ def get_feature_columns() -> list[str]:
         "avg_last_3f",
         "best_last_3f",
         "days_since_last_race",
+        # Rotation derived (ローテーション派生)
+        "rest_flag",
+        "short_rotation_flag",
+        # Aptitude (適性)
+        "same_distance_win_rate",
+        "same_distance_place_rate",
+        "same_venue_win_rate",
+        "same_venue_place_rate",
+        "same_track_condition_place_rate",
         # Jockey
         "jockey_win_rate",
         "jockey_venue_win_rate",
@@ -98,6 +122,16 @@ def get_feature_columns() -> list[str]:
 def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     """Create derived features from base features."""
     df = df.copy()
+
+    # Post position features (枠順関連)
+    if "post_position" in df.columns:
+        df["is_inner_post"] = (df["post_position"] <= 3).astype(int)
+        df["is_outer_post"] = (df["post_position"] >= 6).astype(int)
+
+    # Rotation features (ローテーション関連)
+    if "days_since_last_race" in df.columns:
+        df["rest_flag"] = (df["days_since_last_race"] >= 70).astype(int)
+        df["short_rotation_flag"] = (df["days_since_last_race"] <= 14).astype(int)
 
     # Odds-based features
     if "odds" in df.columns:
