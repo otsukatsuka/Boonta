@@ -1,9 +1,16 @@
 """Simulation service for race visualization."""
 
 import math
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml.pace import predict_pace, get_pace_advantage_score, PaceResult, VENUE_CHARACTERISTICS, TRACK_CONDITION_EFFECTS
+from app.ml.pace import (
+    TRACK_CONDITION_EFFECTS,
+    VENUE_CHARACTERISTICS,
+    PaceResult,
+    get_pace_advantage_score,
+    predict_pace,
+)
 from app.models import RaceEntry
 from app.repositories import EntryRepository, RaceRepository
 from app.schemas.simulation import (
@@ -20,7 +27,6 @@ from app.schemas.simulation import (
     StartFormation,
     TrackConditionResult,
 )
-
 
 # Running style to expected first corner position
 STYLE_TO_CORNER_POSITION = {
@@ -236,7 +242,6 @@ class SimulationService:
 
         for corner_idx, corner_name in enumerate(corners):
             positions = []
-            progress = corner_idx / (len(corners) - 1)  # 0 to 1
 
             for horse in horses_data:
                 style = horse["running_style"]
@@ -314,7 +319,6 @@ class SimulationService:
     ) -> list[ScenarioResult]:
         """Simulate results for different pace scenarios."""
         scenarios = []
-        running_styles = [e.running_style for e in entries]
 
         # Get venue and track condition info
         venue = race.venue if race else None
