@@ -3,7 +3,7 @@
 import math
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml.pace import predict_pace, get_pace_advantage_score, PaceResult
+from app.ml.pace import predict_pace, get_pace_advantage_score, PaceResult, VENUE_CHARACTERISTICS, TRACK_CONDITION_EFFECTS
 from app.models import RaceEntry
 from app.repositories import EntryRepository, RaceRepository
 from app.schemas.simulation import (
@@ -18,6 +18,7 @@ from app.schemas.simulation import (
     ScenarioRanking,
     ScenarioResult,
     StartFormation,
+    TrackConditionResult,
 )
 
 
@@ -56,18 +57,37 @@ class SimulationService:
         if not entries:
             return None
 
-        # Get running styles and predict pace
+        # Get running styles and escape horse popularities
         running_styles = [e.running_style for e in entries]
+        escape_popularities = [
+            e.popularity for e in entries
+            if e.running_style == "ESCAPE" and e.popularity
+        ]
+
+        # Predict pace with venue and track condition
         pace_result = predict_pace(
             running_styles,
             distance=race.distance,
             course_type=race.course_type or "芝",
+            venue=race.venue,
+            track_condition=race.track_condition,
+            escape_popularities=escape_popularities if escape_popularities else None,
         )
+
+        # Get venue description
+        venue_char = VENUE_CHARACTERISTICS.get(race.venue or "", {})
+        venue_description = venue_char.get("description", "")
+        if race.track_condition and race.track_condition != "良":
+            track_effect = TRACK_CONDITION_EFFECTS.get(race.track_condition, {})
+            track_desc = track_effect.get("description", "")
+            if track_desc:
+                venue_description += f" / {race.track_condition}馬場: {track_desc}"
 
         # Generate simulation components
         start_formation = self._generate_start_formation(entries)
-        corner_positions = self._calculate_corner_positions(entries, pace_result)
-        scenarios = self._simulate_scenarios(entries, pace_result)
+        corner_positions = self._calculate_corner_positions(entries, pace_result, race)
+        scenarios = self._simulate_scenarios(entries, pace_result, race)
+        track_condition_scenarios = self._simulate_track_conditions(entries, race)
         animation_frames = self._generate_animation_frames(entries, corner_positions)
 
         return RaceSimulation(
@@ -75,9 +95,13 @@ class SimulationService:
             race_name=race.name,
             distance=race.distance,
             course_type=race.course_type or "芝",
+            venue=race.venue,
+            track_condition=race.track_condition,
+            venue_description=venue_description if venue_description else None,
             corner_positions=corner_positions,
             start_formation=start_formation,
             scenarios=scenarios,
+            track_condition_scenarios=track_condition_scenarios,
             predicted_pace=pace_result.pace_type,
             animation_frames=animation_frames,
         )
@@ -186,6 +210,7 @@ class SimulationService:
         self,
         entries: list[RaceEntry],
         pace_result: PaceResult,
+        race=None,
     ) -> list[CornerPositions]:
         """Calculate horse positions at each corner."""
         corners = ["1C", "2C", "3C", "4C", "goal"]
@@ -285,10 +310,20 @@ class SimulationService:
         self,
         entries: list[RaceEntry],
         base_pace: PaceResult,
+        race=None,
     ) -> list[ScenarioResult]:
         """Simulate results for different pace scenarios."""
         scenarios = []
         running_styles = [e.running_style for e in entries]
+
+        # Get venue and track condition info
+        venue = race.venue if race else None
+        track_condition = race.track_condition if race else "良"
+        venue_char = VENUE_CHARACTERISTICS.get(venue or "", {})
+        front_advantage = venue_char.get("front_advantage", 0.0)
+        track_effect = TRACK_CONDITION_EFFECTS.get(track_condition or "良", {})
+        front_mod = track_effect.get("front_modifier", 0.0)
+        total_front_advantage = front_advantage + front_mod
 
         # Define scenario probabilities based on base prediction
         if base_pace.pace_type == "high":
@@ -299,16 +334,26 @@ class SimulationService:
             probabilities = {"high": 0.25, "middle": 0.5, "slow": 0.25}
 
         for pace_type in ["high", "middle", "slow"]:
-            # Create pace result for this scenario
+            # Create pace result for this scenario with venue/track consideration
             if pace_type == "high":
                 advantageous = ["STALKER", "CLOSER"]
                 description = "激しい先行争いで差し・追込有利"
+                if total_front_advantage >= 0.15:
+                    description += f"（ただし{venue}は前残り傾向）"
             elif pace_type == "slow":
                 advantageous = ["ESCAPE", "FRONT"]
                 description = "スローペースで前残り警戒"
+                if total_front_advantage >= 0.15:
+                    description += f"（{venue}の前有利で逃げ切り濃厚）"
+                elif total_front_advantage <= -0.10:
+                    description += f"（{venue}は差し有利なので注意）"
             else:
                 advantageous = ["FRONT", "STALKER"]
                 description = "平均ペースで実力通りの決着"
+
+            # Add track condition note
+            if track_condition and track_condition != "良":
+                description += f"【{track_condition}馬場】"
 
             scenario_pace = PaceResult(
                 pace_type=pace_type,
@@ -482,3 +527,139 @@ class SimulationService:
         # Linear interpolation
         t = (progress - prev[0]) / (next_pos[0] - prev[0])
         return prev[value_index] + t * (next_pos[value_index] - prev[value_index])
+
+    def _simulate_track_conditions(
+        self,
+        entries: list[RaceEntry],
+        race=None,
+    ) -> list[TrackConditionResult]:
+        """Simulate results for different track conditions (良/稍重/重/不良)."""
+        results = []
+        running_styles = [e.running_style for e in entries]
+
+        # Get venue front advantage
+        venue = race.venue if race else None
+        venue_char = VENUE_CHARACTERISTICS.get(venue or "", {})
+        base_front_advantage = venue_char.get("front_advantage", 0.0)
+
+        # Get escape horse popularities for pace prediction
+        escape_popularities = [
+            e.popularity for e in entries
+            if e.running_style == "ESCAPE" and e.popularity
+        ]
+
+        track_conditions = ["良", "稍重", "重", "不良"]
+
+        for condition in track_conditions:
+            track_effect = TRACK_CONDITION_EFFECTS.get(condition, {})
+            front_mod = track_effect.get("front_modifier", 0.0)
+            total_front_advantage = base_front_advantage + front_mod
+            track_desc = track_effect.get("description", "")
+
+            # Predict pace for this track condition
+            pace_result = predict_pace(
+                running_styles,
+                distance=race.distance if race else 2000,
+                course_type=race.course_type if race else "芝",
+                venue=venue,
+                track_condition=condition,
+                escape_popularities=escape_popularities if escape_popularities else None,
+            )
+
+            # Determine advantageous styles based on track and pace
+            if total_front_advantage >= 0.2:
+                advantageous = ["ESCAPE", "FRONT"]
+                description = f"{condition}馬場: 前有利が強まる。逃げ・先行馬を重視"
+            elif total_front_advantage >= 0.1:
+                advantageous = ["FRONT", "ESCAPE"]
+                description = f"{condition}馬場: やや前有利。先行馬に注目"
+            elif total_front_advantage <= -0.05:
+                advantageous = ["STALKER", "CLOSER"]
+                description = f"{condition}馬場: 差し有利。末脚勝負"
+            else:
+                advantageous = pace_result.advantageous_styles
+                description = f"{condition}馬場: {track_desc}" if track_desc else f"{condition}馬場"
+
+            # Calculate scores for each horse
+            horse_scores = []
+            for entry in entries:
+                if not entry.horse:
+                    continue
+                style = entry.running_style or "VERSATILE"
+
+                # Base score from odds (reduced weight)
+                odds = entry.odds or 50.0
+                base_score = 1.0 / (1.0 + math.log(odds + 1))
+
+                # Track condition advantage - STRONGER adjustments
+                # 馬場状態による調整を大きくする
+                if style in advantageous:
+                    position = advantageous.index(style)
+                    # 第1有利: +40%, 第2有利: +25%
+                    advantage = 1.4 - (position * 0.15)
+                else:
+                    # Disadvantageous styles - STRONGER penalty
+                    if style in ["ESCAPE", "FRONT"] and total_front_advantage < 0:
+                        # 差し有利コースで前の馬は大きく不利
+                        advantage = 0.65
+                    elif style in ["STALKER", "CLOSER"] and total_front_advantage >= 0.2:
+                        # 前有利コース（重馬場など）で差し馬は大きく不利
+                        advantage = 0.60
+                    elif style in ["STALKER", "CLOSER"] and total_front_advantage >= 0.1:
+                        # やや前有利で差し馬はやや不利
+                        advantage = 0.75
+                    else:
+                        advantage = 0.9
+
+                # 馬場が悪いほど脚質の影響を大きくする
+                if condition in ["重", "不良"]:
+                    # 重・不良では脚質の差がより顕著に
+                    if advantage > 1.0:
+                        advantage = 1.0 + (advantage - 1.0) * 1.3  # ボーナス強化
+                    else:
+                        advantage = 1.0 - (1.0 - advantage) * 1.3  # ペナルティ強化
+
+                score = base_score * advantage
+
+                horse_scores.append({
+                    "horse_number": entry.horse_number or 0,
+                    "horse_name": entry.horse.name,
+                    "running_style": style,
+                    "score": score,
+                    "popularity": entry.popularity or 10,
+                })
+
+            # Sort by score and get top 5
+            horse_scores.sort(key=lambda x: x["score"], reverse=True)
+            rankings = []
+            key_horses = []
+
+            for rank, h in enumerate(horse_scores[:5], 1):
+                rankings.append(ScenarioRanking(
+                    rank=rank,
+                    horse_number=h["horse_number"],
+                    horse_name=h["horse_name"],
+                    score=min(h["score"], 1.0),
+                ))
+
+            # Find key horses (dark horses that benefit from this condition)
+            for h in horse_scores:
+                if h["popularity"] >= 6 and h["running_style"] in advantageous:
+                    key_horses.append(ScenarioKeyHorse(
+                        horse_number=h["horse_number"],
+                        horse_name=h["horse_name"],
+                        reason=f"{condition}馬場で有利",
+                    ))
+                    if len(key_horses) >= 2:
+                        break
+
+            results.append(TrackConditionResult(
+                track_condition=condition,
+                front_advantage=total_front_advantage,
+                rankings=rankings,
+                key_horses=key_horses,
+                advantageous_styles=advantageous,
+                description=description,
+            ))
+
+        return results

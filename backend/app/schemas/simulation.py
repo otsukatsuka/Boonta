@@ -74,6 +74,17 @@ class ScenarioResult(BaseSchema):
     description: str = Field("", description="シナリオ説明")
 
 
+class TrackConditionResult(BaseSchema):
+    """Result for a track condition scenario."""
+
+    track_condition: str = Field(..., description="馬場状態 (良/稍重/重/不良)")
+    front_advantage: float = Field(..., description="前有利度 (0.0~0.3)")
+    rankings: list[ScenarioRanking] = Field(default_factory=list, description="上位5頭")
+    key_horses: list[ScenarioKeyHorse] = Field(default_factory=list, description="注目馬（この馬場で有利な馬）")
+    advantageous_styles: list[str] = Field(default_factory=list, description="有利な脚質")
+    description: str = Field("", description="馬場状態の説明")
+
+
 class AnimationHorse(BaseSchema):
     """Horse position in animation frame."""
 
@@ -98,6 +109,9 @@ class RaceSimulation(BaseSchema):
     race_name: str = Field("", description="レース名")
     distance: int = Field(2000, description="距離（m）")
     course_type: str = Field("芝", description="コース種別")
+    venue: str | None = Field(None, description="競馬場")
+    track_condition: str | None = Field(None, description="馬場状態（良/稍重/重/不良）")
+    venue_description: str | None = Field(None, description="競馬場の特性説明")
 
     # Position chart data
     corner_positions: list[CornerPositions] = Field(
@@ -109,9 +123,14 @@ class RaceSimulation(BaseSchema):
         default_factory=StartFormation, description="スタート時の隊列"
     )
 
-    # Scenario comparison data
+    # Scenario comparison data (pace-based)
     scenarios: list[ScenarioResult] = Field(
-        default_factory=list, description="シナリオ別結果"
+        default_factory=list, description="ペース別シナリオ結果"
+    )
+
+    # Track condition scenarios
+    track_condition_scenarios: list[TrackConditionResult] = Field(
+        default_factory=list, description="馬場状態別シナリオ結果"
     )
 
     # Current predicted pace
