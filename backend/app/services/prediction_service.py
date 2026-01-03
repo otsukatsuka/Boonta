@@ -109,7 +109,7 @@ class PredictionService:
             return None
 
         # 各馬の過去成績を分析
-        analyses = await self._analyze_all_horses(entries)
+        analyses = await self._analyze_all_horses(entries, race.grade)
 
         # ペース予想
         pace_prediction = self._predict_pace(entries, analyses)
@@ -144,8 +144,8 @@ class PredictionService:
 
         return self._to_response(prediction)
 
-    async def _analyze_all_horses(self, entries: list[RaceEntry]) -> dict[int, HorseAnalysis]:
-        """Analyze all horses based on entry data."""
+    async def _analyze_all_horses(self, entries: list[RaceEntry], race_grade: str = "G1") -> dict[int, HorseAnalysis]:
+        """Analyze all horses based on entry data and race grade."""
         analyses = {}
 
         for entry in entries:
@@ -183,8 +183,15 @@ class PredictionService:
             win_rate = min(1.0 / odds, 0.5) if odds > 0 else 0.05
             place_rate = min(3.0 / odds, 0.8) if odds > 0 else 0.15
 
-            # G1なので全馬重賞実績ありと仮定
-            grade_race_wins = 1 if popularity <= 10 else 0
+            # グレード別の重賞実績推定
+            # G1: 出走馬は基本的に重賞実績あり
+            # G3: 条件戦上がりも多いため、上位人気のみ実績ありと仮定
+            if race_grade == "G1":
+                grade_race_wins = 1 if popularity <= 10 else 0
+            elif race_grade in ("G2", "G3"):
+                grade_race_wins = 1 if popularity <= 5 else 0
+            else:
+                grade_race_wins = 0
 
             analyses[entry.horse_id] = HorseAnalysis(
                 horse_id=entry.horse_id,

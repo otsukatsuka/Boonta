@@ -1,7 +1,7 @@
 // Prediction hooks with React Query
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { predictionsApi, modelApi } from '../api';
+import { predictionsApi, modelApi, type CollectTrainingDataRequest } from '../api';
 
 export const predictionKeys = {
   all: ['predictions'] as const,
@@ -65,5 +65,17 @@ export function useFeatureImportance() {
   return useQuery({
     queryKey: modelKeys.featureImportance(),
     queryFn: () => modelApi.getFeatureImportance(),
+  });
+}
+
+export function useCollectTrainingData() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CollectTrainingDataRequest) =>
+      modelApi.collectTrainingData(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: modelKeys.status() });
+    },
   });
 }

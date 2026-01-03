@@ -2,8 +2,15 @@
 Train ML model for horse racing prediction using AutoGluon.
 
 This script trains a model to predict whether a horse will place (finish in top 3).
+
+Usage:
+    python scripts/train_model.py                         # G1 + G3 (default)
+    python scripts/train_model.py --grade G3              # G3 only
+    python scripts/train_model.py --grade all             # G1 + G3 combined
+    python scripts/train_model.py --with-history          # With horse history features
 """
 
+import argparse
 import os
 import sys
 
@@ -16,11 +23,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def load_and_preprocess_data(csv_path: str) -> pd.DataFrame:
-    """Load and preprocess training data."""
+    """Load and preprocess training data from CSV file."""
     print(f"Loading data from {csv_path}")
     df = pd.read_csv(csv_path)
-
     print(f"Loaded {len(df)} records")
+    return load_and_preprocess_data_from_df(df)
+
+
+def load_and_preprocess_data_from_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Preprocess training data from DataFrame."""
+    print(f"Preprocessing {len(df)} records")
 
     # Drop rows with missing critical values
     df = df.dropna(subset=["position", "odds", "running_style"])
@@ -89,6 +101,31 @@ def train_model(df: pd.DataFrame, model_dir: str, target: str = "is_place"):
         df["last_3f"] = df["last_3f"].fillna(df["last_3f"].median())
         features.append("last_3f")
 
+    # Add horse history features if available (from --with-history collection)
+    history_features = [
+        "total_races",
+        "total_wins",
+        "total_places",
+        "grade_wins",
+        "win_rate",
+        "place_rate",
+        "avg_position_last5",
+        "days_since_last_race",
+    ]
+    for feat in history_features:
+        if feat in df.columns and df[feat].notna().any():
+            df[feat] = df[feat].fillna(df[feat].median() if df[feat].dtype in ['float64', 'int64'] else 0)
+            features.append(feat)
+
+    # Add history last_3f features
+    if "best_last_3f" in df.columns and df["best_last_3f"].notna().any():
+        df["best_last_3f"] = df["best_last_3f"].fillna(df["best_last_3f"].median())
+        features.append("best_last_3f")
+
+    if "avg_last_3f_hist" in df.columns and df["avg_last_3f_hist"].notna().any():
+        df["avg_last_3f_hist"] = df["avg_last_3f_hist"].fillna(df["avg_last_3f_hist"].median())
+        features.append("avg_last_3f_hist")
+
     # Prepare training data
     train_data = df[features + [target]].copy()
 
@@ -129,23 +166,70 @@ def train_model(df: pd.DataFrame, model_dir: str, target: str = "is_place"):
     return predictor
 
 
+def load_combined_data(data_dir: str, grades: list[str], with_history: bool = False) -> pd.DataFrame:
+    """Load and combine data from multiple grade CSV files."""
+    dfs = []
+    suffix = "_hist" if with_history else ""
+
+    for grade in grades:
+        csv_path = os.path.join(data_dir, f"{grade.lower()}_races{suffix}.csv")
+        # Fallback to non-history file if history file doesn't exist
+        if not os.path.exists(csv_path) and with_history:
+            csv_path = os.path.join(data_dir, f"{grade.lower()}_races.csv")
+            print(f"Warning: History file not found, using {csv_path}")
+
+        if os.path.exists(csv_path):
+            print(f"Loading {grade} data from {csv_path}")
+            df = pd.read_csv(csv_path)
+            print(f"  Loaded {len(df)} records")
+            dfs.append(df)
+        else:
+            print(f"Warning: {csv_path} not found, skipping...")
+
+    if not dfs:
+        return pd.DataFrame()
+
+    combined = pd.concat(dfs, ignore_index=True)
+    print(f"\nTotal combined records: {len(combined)}")
+    return combined
+
+
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Train ML model for horse racing prediction")
+    parser.add_argument(
+        "--grade",
+        choices=["G1", "G3", "all"],
+        default="all",
+        help="Grade to train on (default: all = G1 + G3 combined)",
+    )
+    parser.add_argument(
+        "--with-history",
+        action="store_true",
+        help="Use data with horse history features (requires _hist.csv files)",
+    )
+    args = parser.parse_args()
+
     # Paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "..", "data", "training")
     model_dir = os.path.join(script_dir, "..", "models", "place_predictor")
 
-    csv_path = os.path.join(data_dir, "g1_races.csv")
+    # Determine which grades to load
+    if args.grade == "all":
+        grades = ["G1", "G3"]
+    else:
+        grades = [args.grade]
 
-    # Check if data exists
-    if not os.path.exists(csv_path):
-        print(f"Error: Training data not found at {csv_path}")
+    # Load data
+    df = load_combined_data(data_dir, grades, with_history=args.with_history)
+    if df.empty:
+        print("Error: No training data found.")
         print("Please run collect_training_data.py first.")
         sys.exit(1)
 
-    # Load and preprocess
-    df = load_and_preprocess_data(csv_path)
+    # Preprocess
+    df = load_and_preprocess_data_from_df(df)
 
     if len(df) < 100:
         print("Warning: Less than 100 training samples. Model may not be reliable.")
@@ -154,8 +238,10 @@ def main():
     os.makedirs(os.path.dirname(model_dir), exist_ok=True)
 
     # Train model
+    grade_str = "+".join(grades)
+    hist_str = " (with horse history)" if args.with_history else ""
     print("\n" + "=" * 50)
-    print("Training model for place prediction (top 3)")
+    print(f"Training model for place prediction (top 3) using {grade_str} data{hist_str}")
     print("=" * 50)
 
     predictor = train_model(df, model_dir, target="is_place")

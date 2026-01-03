@@ -5,7 +5,9 @@
 ## 特徴
 
 - **展開予想重視**: 逃げ馬・先行馬の数からペースを予測し、有利な脚質を分析
-- **MLモデル統合**: AutoGluonによる複勝予測モデル（ROC AUC: 0.801）
+- **MLモデル統合**: AutoGluonによる複勝予測モデル（ROC AUC: 0.845）
+- **馬の過去成績分析**: 勝率・複勝率・直近5走平均着順などを特徴量として活用
+- **G1/G3対応**: 重賞レースの学習データを自動収集
 - **netkeiba連携**: 出馬表・オッズ・過去成績を自動取得
 
 ## 技術スタック
@@ -108,14 +110,49 @@ curl -X POST http://localhost:8000/api/predictions/1
 ```bash
 cd backend
 source .venv/bin/activate
-python scripts/collect_training_data.py
+
+# G1レースのみ収集
+python scripts/collect_training_data.py --grade G1
+
+# G3レースのみ収集
+python scripts/collect_training_data.py --grade G3
+
+# G1 + G3 両方収集
+python scripts/collect_training_data.py --grade all
+
+# 馬の過去成績付きで収集（精度向上、時間がかかる）
+python scripts/collect_training_data.py --grade G1 --with-history
+```
+
+### G3レースID取得
+
+```bash
+# netkeibaからG3レースIDを自動取得
+python scripts/fetch_grade_race_ids.py
 ```
 
 ### モデル学習
 
 ```bash
+# 通常学習
 python scripts/train_model.py
+
+# 過去成績特徴量付きで学習（推奨）
+python scripts/train_model.py --with-history
+
+# グレード指定
+python scripts/train_model.py --grade G1 --with-history
 ```
+
+### 学習データの特徴量
+
+| カテゴリ | 特徴量 |
+|---------|--------|
+| 基本情報 | 馬番, オッズ, 人気, 斤量, 馬体重 |
+| レース情報 | 距離, コース(芝/ダート), グレード |
+| 脚質 | 逃げ/先行/差し/追込 |
+| 過去成績 | 勝率, 複勝率, 直近5走平均着順, 重賞勝利数 |
+| 上がり | 過去最高上がり3F, 平均上がり3F |
 
 学習データは `backend/data/training/`、モデルは `backend/models/place_predictor/` に保存されます。
 

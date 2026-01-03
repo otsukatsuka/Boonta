@@ -3,6 +3,21 @@
 import apiClient from './client';
 import type { Race, RaceCreate, RaceListResponse, RaceUpdate } from '../types';
 
+export interface RegisterRaceRequest {
+  netkeiba_race_id: string;
+  fetch_odds?: boolean;
+  fetch_running_styles?: boolean;
+}
+
+export interface RegisterRaceResponse {
+  success: boolean;
+  message: string;
+  race_id: number | null;
+  race_name: string | null;
+  entries_count: number;
+  odds_updated: number;
+}
+
 export const racesApi = {
   // Get all races with pagination
   getAll: async (params?: {
@@ -67,5 +82,11 @@ export const racesApi = {
   // Delete race
   delete: async (raceId: number): Promise<void> => {
     await apiClient.delete(`/races/${raceId}`);
+  },
+
+  // Register race from netkeiba ID
+  registerFromNetkeiba: async (data: RegisterRaceRequest): Promise<RegisterRaceResponse> => {
+    const response = await apiClient.post('/fetch/register', data);
+    return response.data;
   },
 };

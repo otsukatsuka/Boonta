@@ -1,7 +1,7 @@
 // Race hooks with React Query
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { racesApi } from '../api';
+import { racesApi, type RegisterRaceRequest } from '../api/races';
 import type { RaceCreate, RaceUpdate } from '../types';
 
 export const raceKeys = {
@@ -73,6 +73,17 @@ export function useDeleteRace() {
 
   return useMutation({
     mutationFn: (raceId: number) => racesApi.delete(raceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: raceKeys.lists() });
+    },
+  });
+}
+
+export function useRegisterRace() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: RegisterRaceRequest) => racesApi.registerFromNetkeiba(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: raceKeys.lists() });
     },
