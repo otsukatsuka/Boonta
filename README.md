@@ -1,4 +1,4 @@
-![Backend Tests](https://github.com/s-otsuka/Boonta/actions/workflows/backend-tests.yml/badge.svg)
+![Backend Tests](https://github.com/otsukatsuka/Boonta/actions/workflows/backend-tests.yml/badge.svg)
 
 # Boonta - 競馬予想AI
 
