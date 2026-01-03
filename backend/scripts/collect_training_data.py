@@ -1,5 +1,11 @@
 """
-Script to collect historical G1 race data for ML training.
+Script to collect historical race data for ML training.
+
+Usage:
+    python scripts/collect_training_data.py                    # G1 races (default)
+    python scripts/collect_training_data.py --grade G3         # G3 races
+    python scripts/collect_training_data.py --grade all        # Both G1 and G3
+    python scripts/collect_training_data.py --grade all --with-history  # With horse history
 
 Netkeiba Race ID format: YYYYVVKKDDNN
 - YYYY: Year
@@ -9,8 +15,10 @@ Netkeiba Race ID format: YYYYVVKKDDNN
 - NN: Race number (01-12)
 """
 
+import argparse
 import asyncio
 import csv
+import json
 import os
 import sys
 from dataclasses import asdict, dataclass, field
@@ -55,7 +63,7 @@ G1_RACES = [
 
 # Known G1 race IDs (manually collected for accuracy)
 KNOWN_G1_RACE_IDS = [
-    # 2024年 G1
+    # 2024年度 G1 (netkeiba年度形式: 2024年12月〜2025年2月は2025、それ以前は2024)
     "202405050811",  # フェブラリーS 2024
     "202407010811",  # 高松宮記念 2024
     "202409020811",  # 大阪杯 2024
@@ -76,9 +84,9 @@ KNOWN_G1_RACE_IDS = [
     "202408050911",  # マイルCS 2024
     "202405050911",  # ジャパンC 2024
     "202407050811",  # チャンピオンズC 2024
-    "202409040611",  # 阪神JF 2024
-    "202409040711",  # 朝日杯FS 2024
-    "202406050811",  # 有馬記念 2024
+    "202509040611",  # 阪神JF 2024 (12月開催は2025年度扱い)
+    "202509040711",  # 朝日杯FS 2024
+    "202506050811",  # 有馬記念 2024
     # 2023年 G1
     "202305050811",  # フェブラリーS 2023
     "202307010811",  # 高松宮記念 2023
@@ -92,7 +100,7 @@ KNOWN_G1_RACE_IDS = [
     "202305021111",  # 日本ダービー 2023
     "202305030811",  # 安田記念 2023
     "202309030911",  # 宝塚記念 2023
-    "202304040811",  # スプリンターズS 2023
+    "202306040811",  # スプリンターズS 2023 (中山)
     "202308040811",  # 秋華賞 2023
     "202308040911",  # 菊花賞 2023
     "202305040811",  # 天皇賞秋 2023
@@ -100,9 +108,9 @@ KNOWN_G1_RACE_IDS = [
     "202308050911",  # マイルCS 2023
     "202305050911",  # ジャパンC 2023
     "202307050811",  # チャンピオンズC 2023
-    "202309040611",  # 阪神JF 2023
-    "202309040711",  # 朝日杯FS 2023
-    "202306050811",  # 有馬記念 2023
+    "202409040611",  # 阪神JF 2023 (12月開催は2024年度扱い)
+    "202409040711",  # 朝日杯FS 2023
+    "202406050811",  # 有馬記念 2023
     # 2022年 G1
     "202205050811",  # フェブラリーS 2022
     "202207010811",  # 高松宮記念 2022
@@ -162,6 +170,18 @@ class TrainingData:
     is_win: int = 0  # 1着かどうか
     is_place: int = 0  # 3着以内かどうか
 
+    # Horse history (過去成績)
+    total_races: int = 0           # 出走回数
+    total_wins: int = 0            # 勝利数
+    total_places: int = 0          # 複勝回数（3着以内）
+    grade_wins: int = 0            # 重賞勝利数
+    win_rate: float = 0.0          # 勝率
+    place_rate: float = 0.0        # 複勝率
+    avg_position_last5: float = 0.0  # 直近5走平均着順
+    best_last_3f: float | None = None  # ベスト上がり3F
+    avg_last_3f_hist: float | None = None  # 平均上がり3F（過去）
+    days_since_last_race: int = 0  # 前走からの日数
+
 
 async def fetch_race_result(fetcher: NetkeibaFetcher, race_id: str) -> list[TrainingData]:
     """Fetch race result and convert to training data."""
@@ -214,7 +234,7 @@ async def fetch_race_result(fetcher: NetkeibaFetcher, race_id: str) -> list[Trai
 
 
 async def fetch_result_details(fetcher: NetkeibaFetcher, race_id: str) -> dict[int, dict]:
-    """Fetch detailed result info (position, time, last_3f) from result page."""
+    """Fetch detailed result info (position, time, last_3f, horse_id) from result page."""
     import re
     from bs4 import BeautifulSoup
 
@@ -250,6 +270,15 @@ async def fetch_result_details(fetcher: NetkeibaFetcher, race_id: str) -> dict[i
                 continue
             horse_number = int(horse_number_text)
 
+            # Horse ID from horse name link (column 3)
+            horse_id = None
+            horse_link = cols[3].select_one("a[href*='/horse/']")
+            if horse_link:
+                href = horse_link.get("href", "")
+                horse_id_match = re.search(r"/horse/(\d+)", href)
+                if horse_id_match:
+                    horse_id = horse_id_match.group(1)
+
             # タイム (column 7)
             time_str = cols[7].get_text(strip=True)
             time_seconds = None
@@ -274,6 +303,7 @@ async def fetch_result_details(fetcher: NetkeibaFetcher, race_id: str) -> dict[i
                 "position": position,
                 "time_seconds": time_seconds,
                 "last_3f": last_3f,
+                "horse_id": horse_id,
             }
 
         except Exception as e:
@@ -282,9 +312,138 @@ async def fetch_result_details(fetcher: NetkeibaFetcher, race_id: str) -> dict[i
     return results
 
 
-async def collect_training_data(race_ids: list[str], output_file: str):
+async def calculate_horse_history(
+    fetcher: NetkeibaFetcher,
+    horse_id: str,
+    race_date: str,
+    cache: dict,
+) -> dict:
+    """
+    Calculate horse history features from past race results.
+
+    Args:
+        fetcher: NetkeibaFetcher instance
+        horse_id: Netkeiba horse ID
+        race_date: Current race date (YYYY-MM-DD format) to filter past results
+        cache: Cache dict to store/reuse horse results
+
+    Returns:
+        Dict with history features
+    """
+    # Default values for horses with no history
+    default = {
+        "total_races": 0,
+        "total_wins": 0,
+        "total_places": 0,
+        "grade_wins": 0,
+        "win_rate": 0.0,
+        "place_rate": 0.0,
+        "avg_position_last5": 10.0,
+        "best_last_3f": None,
+        "avg_last_3f_hist": None,
+        "days_since_last_race": 365,
+    }
+
+    if not horse_id:
+        return default
+
+    # Check cache first
+    cache_key = horse_id
+    if cache_key not in cache:
+        # Fetch horse results (up to 20 past races)
+        results = await fetcher.fetch_horse_results(horse_id, limit=20)
+        cache[cache_key] = results
+
+    all_results = cache[cache_key]
+
+    if not all_results:
+        return default
+
+    # Filter results before the current race date
+    # race_date format: YYYY-MM-DD, result.race_date format may vary
+    past_results = []
+    for r in all_results:
+        # Try to parse result date (various formats)
+        try:
+            # Try format: YYYY/MM/DD
+            if "/" in r.race_date:
+                parts = r.race_date.split("/")
+                result_date = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+            else:
+                result_date = r.race_date
+
+            if result_date < race_date:
+                past_results.append(r)
+        except Exception:
+            past_results.append(r)  # Include if can't parse date
+
+    if not past_results:
+        return default
+
+    # Calculate features
+    total_races = len(past_results)
+    total_wins = sum(1 for r in past_results if r.position == 1)
+    total_places = sum(1 for r in past_results if 1 <= r.position <= 3)
+
+    # Grade wins (races with G1, G2, G3 in name)
+    grade_wins = sum(
+        1 for r in past_results
+        if r.position == 1 and any(g in r.race_name for g in ["G1", "G2", "G3", "(G"])
+    )
+
+    # Win/place rate
+    win_rate = total_wins / total_races if total_races > 0 else 0.0
+    place_rate = total_places / total_races if total_races > 0 else 0.0
+
+    # Average position in last 5 races
+    last_5 = [r for r in past_results[:5] if r.position > 0]
+    avg_position_last5 = (
+        sum(r.position for r in last_5) / len(last_5)
+        if last_5 else 10.0
+    )
+
+    # Best and average last 3F
+    last_3f_values = [r.last_3f for r in past_results if r.last_3f and r.last_3f > 0]
+    best_last_3f = min(last_3f_values) if last_3f_values else None
+    avg_last_3f_hist = (
+        sum(last_3f_values) / len(last_3f_values)
+        if last_3f_values else None
+    )
+
+    # Days since last race
+    days_since_last_race = 365  # Default
+    if past_results:
+        try:
+            last_race_date = past_results[0].race_date
+            if "/" in last_race_date:
+                parts = last_race_date.split("/")
+                last_race_date = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+
+            from datetime import datetime as dt
+            current = dt.strptime(race_date, "%Y-%m-%d")
+            last = dt.strptime(last_race_date, "%Y-%m-%d")
+            days_since_last_race = (current - last).days
+        except Exception:
+            pass
+
+    return {
+        "total_races": total_races,
+        "total_wins": total_wins,
+        "total_places": total_places,
+        "grade_wins": grade_wins,
+        "win_rate": round(win_rate, 3),
+        "place_rate": round(place_rate, 3),
+        "avg_position_last5": round(avg_position_last5, 2),
+        "best_last_3f": best_last_3f,
+        "avg_last_3f_hist": round(avg_last_3f_hist, 2) if avg_last_3f_hist else None,
+        "days_since_last_race": days_since_last_race,
+    }
+
+
+async def collect_training_data(race_ids: list[str], output_file: str, with_history: bool = False):
     """Collect training data from multiple races."""
     all_data = []
+    horse_cache = {}  # Cache for horse history
 
     async with NetkeibaFetcher() as fetcher:
         for i, race_id in enumerate(race_ids):
@@ -297,10 +456,10 @@ async def collect_training_data(race_ids: list[str], output_file: str):
                 if not data_list:
                     continue
 
-                # Get detailed results (position, time, last_3f)
+                # Get detailed results (position, time, last_3f, horse_id)
                 result_details = await fetch_result_details(fetcher, race_id)
 
-                # Merge detail info
+                # Merge detail info and optionally fetch horse history
                 for data in data_list:
                     details = result_details.get(data.horse_number, {})
                     data.position = details.get("position", 0)
@@ -309,7 +468,29 @@ async def collect_training_data(race_ids: list[str], output_file: str):
                     data.is_win = 1 if data.position == 1 else 0
                     data.is_place = 1 if 1 <= data.position <= 3 else 0
 
+                    # Fetch horse history if requested
+                    if with_history:
+                        horse_id = details.get("horse_id")
+                        if horse_id and data.race_date:
+                            history = await calculate_horse_history(
+                                fetcher, horse_id, data.race_date, horse_cache
+                            )
+                            # Update data with history features
+                            data.total_races = history["total_races"]
+                            data.total_wins = history["total_wins"]
+                            data.total_places = history["total_places"]
+                            data.grade_wins = history["grade_wins"]
+                            data.win_rate = history["win_rate"]
+                            data.place_rate = history["place_rate"]
+                            data.avg_position_last5 = history["avg_position_last5"]
+                            data.best_last_3f = history["best_last_3f"]
+                            data.avg_last_3f_hist = history["avg_last_3f_hist"]
+                            data.days_since_last_race = history["days_since_last_race"]
+
                 all_data.extend(data_list)
+
+                if with_history:
+                    print(f"    Processed {len(data_list)} entries (cache size: {len(horse_cache)})")
 
             except Exception as e:
                 print(f"  Error processing {race_id}: {e}")
@@ -332,23 +513,67 @@ async def collect_training_data(race_ids: list[str], output_file: str):
         print("No data collected.")
 
 
+def load_race_ids(grade: str, data_dir: str) -> list[str]:
+    """Load race IDs for the specified grade."""
+    if grade == "G1":
+        return KNOWN_G1_RACE_IDS
+    elif grade in ("G2", "G3"):
+        json_file = os.path.join(data_dir, f"{grade.lower()}_race_ids.json")
+        if not os.path.exists(json_file):
+            print(f"Error: {json_file} not found.")
+            print(f"Run: python scripts/fetch_grade_race_ids.py --grade {grade}")
+            return []
+        with open(json_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("race_ids", [])
+    else:
+        return []
+
+
 async def main():
     """Main entry point."""
-    # Use known G1 race IDs
-    race_ids = KNOWN_G1_RACE_IDS
+    parser = argparse.ArgumentParser(description="Collect historical race data for ML training")
+    parser.add_argument(
+        "--grade",
+        choices=["G1", "G2", "G3", "all"],
+        default="G1",
+        help="Grade to collect (default: G1)",
+    )
+    parser.add_argument(
+        "--with-history",
+        action="store_true",
+        help="Fetch horse past race history for additional features (slower)",
+    )
+    args = parser.parse_args()
 
-    # Output file
-    output_dir = os.path.dirname(os.path.abspath(__file__))
-    output_file = os.path.join(output_dir, "..", "data", "training", "g1_races.csv")
+    # Determine which grades to process
+    grades = ["G1", "G3"] if args.grade == "all" else [args.grade]
 
-    # Create directory if needed
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    # Base directories
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, "..", "data")
+    training_dir = os.path.join(data_dir, "training")
+    os.makedirs(training_dir, exist_ok=True)
 
-    print(f"Collecting training data from {len(race_ids)} G1 races...")
-    print(f"Output: {output_file}")
-    print()
+    for grade in grades:
+        # Load race IDs for this grade
+        race_ids = load_race_ids(grade, data_dir)
+        if not race_ids:
+            print(f"No race IDs found for {grade}, skipping...")
+            continue
 
-    await collect_training_data(race_ids, output_file)
+        # Output file (add _hist suffix if with history)
+        suffix = "_hist" if args.with_history else ""
+        output_file = os.path.join(training_dir, f"{grade.lower()}_races{suffix}.csv")
+
+        print(f"\n{'='*60}")
+        print(f"Collecting training data from {len(race_ids)} {grade} races...")
+        if args.with_history:
+            print("Including horse history features (this will take longer)")
+        print(f"Output: {output_file}")
+        print(f"{'='*60}\n")
+
+        await collect_training_data(race_ids, output_file, with_history=args.with_history)
 
 
 if __name__ == "__main__":

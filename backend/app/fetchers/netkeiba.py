@@ -58,6 +58,12 @@ class NetkeibaFetcher(DataFetcher):
             race_name_match = re.match(r"(.+?)\s*出馬表", title_text)
             race_name = race_name_match.group(1).strip() if race_name_match else "Unknown"
 
+            # Try to parse date from title first as fallback
+            title_date = ""
+            title_date_match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", title_text)
+            if title_date_match:
+                title_date = f"{title_date_match.group(1)}-{int(title_date_match.group(2)):02d}-{int(title_date_match.group(3)):02d}"
+
             # Parse race data from RaceData01
             race_data = soup.select_one(".RaceData01")
             race_data_text = race_data.get_text() if race_data else ""
@@ -76,7 +82,7 @@ class NetkeibaFetcher(DataFetcher):
             # Parse venue and date from RaceData02
             race_data2 = soup.select_one(".RaceData02")
             venue = "東京"
-            race_date = ""
+            race_date = title_date  # Use title date as default
 
             if race_data2:
                 data2_text = race_data2.get_text()
@@ -85,10 +91,15 @@ class NetkeibaFetcher(DataFetcher):
                 if venue_match:
                     venue = venue_match.group(1)
 
-                # Extract date
+                # Extract date from RaceData02 (more reliable)
                 date_match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", data2_text)
                 if date_match:
                     race_date = f"{date_match.group(1)}-{int(date_match.group(2)):02d}-{int(date_match.group(3)):02d}"
+
+            # If still no date, raise error
+            if not race_date:
+                print(f"Warning: Could not parse date for race {race_id}")
+                return None
 
             # Extract grade
             grade = "OP"
@@ -388,6 +399,100 @@ class NetkeibaFetcher(DataFetcher):
         Returns:
             List of OddsInfo with odds, popularity, and estimated running style
         """
+        # Try race.netkeiba.com first (for recent results)
+        odds_list = await self._fetch_odds_from_race_result(race_id)
+        if odds_list:
+            return odds_list
+
+        # Fallback to db.netkeiba.com
+        return await self._fetch_odds_from_db_result(race_id)
+
+    async def _fetch_odds_from_race_result(self, race_id: str) -> list[OddsInfo]:
+        """Fetch from race.netkeiba.com/race/result.html (for recent races)."""
+        url = f"{self.BASE_URL}/race/result.html?race_id={race_id}"
+
+        try:
+            await asyncio.sleep(self.delay)
+            response = await self.client.get(url)
+
+            if response.status_code != 200:
+                return []
+
+            # race.netkeiba.com uses EUC-JP
+            html = response.content.decode("euc-jp", errors="ignore")
+            soup = BeautifulSoup(html, "lxml")
+            odds_list = []
+
+            # Find result table (Shutuba_Table class)
+            table = soup.select_one("table.Shutuba_Table, table.RaceTable01")
+            if not table:
+                return []
+
+            rows = table.select("tr")
+
+            for row in rows:
+                try:
+                    cols = row.select("td")
+                    if len(cols) < 13:
+                        continue
+
+                    # Column indices for race.netkeiba.com result page:
+                    # 0: 着順, 1: 枠番, 2: 馬番, 3: 馬名, 4: 性齢, 5: 斤量
+                    # 6: 騎手, 7: タイム, 8: 着差, 9: 人気, 10: 単勝オッズ
+                    # 11: 上がり3F, 12: 通過順, 13: 厩舎, 14: 馬体重
+
+                    # Extract position (column 0)
+                    position_text = cols[0].get_text(strip=True)
+                    if not position_text.isdigit():
+                        continue
+
+                    # Extract horse number (column 2)
+                    horse_number_text = cols[2].get_text(strip=True)
+                    if not horse_number_text.isdigit():
+                        continue
+                    horse_number = int(horse_number_text)
+
+                    # Extract popularity (column 9)
+                    popularity_text = cols[9].get_text(strip=True) if len(cols) > 9 else ""
+                    try:
+                        popularity = int(popularity_text)
+                    except ValueError:
+                        popularity = 99
+
+                    # Extract odds (column 10)
+                    odds_text = cols[10].get_text(strip=True) if len(cols) > 10 else ""
+                    try:
+                        odds = float(odds_text)
+                    except ValueError:
+                        odds = 99.9
+
+                    # Extract corner positions (column 12)
+                    corner_text = cols[12].get_text(strip=True) if len(cols) > 12 else ""
+                    corner_positions = self._parse_corner_positions(corner_text)
+
+                    # Estimate running style from corner positions
+                    running_style = self._estimate_running_style(corner_positions)
+
+                    odds_list.append(OddsInfo(
+                        horse_number=horse_number,
+                        odds=odds,
+                        popularity=popularity,
+                        corner_positions=corner_positions,
+                        running_style=running_style,
+                    ))
+
+                except Exception as e:
+                    print(f"Error parsing result row: {e}")
+                    continue
+
+            return odds_list
+
+        except Exception as e:
+            print(f"Error fetching from race result: {e}")
+            return []
+
+    async def _fetch_odds_from_db_result(self, race_id: str) -> list[OddsInfo]:
+        """Fetch from db.netkeiba.com (for older races)."""
         url = f"{self.DB_URL}/race/{race_id}/"
 
         try:

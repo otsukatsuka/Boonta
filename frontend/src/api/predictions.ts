@@ -40,6 +40,18 @@ export const predictionsApi = {
   },
 };
 
+export interface CollectTrainingDataRequest {
+  netkeiba_race_id: string;
+}
+
+export interface CollectTrainingDataResponse {
+  success: boolean;
+  message: string;
+  race_name: string | null;
+  records_added: number;
+  total_records: number;
+}
+
 export const modelApi = {
   // Get model status
   getStatus: async (): Promise<ModelStatus> => {
@@ -56,5 +68,13 @@ export const modelApi = {
   // Train model (returns 501 for now)
   train: async (): Promise<void> => {
     await apiClient.post('/model/train');
+  },
+
+  // Collect training data from a finished race
+  collectTrainingData: async (
+    data: CollectTrainingDataRequest
+  ): Promise<CollectTrainingDataResponse> => {
+    const response = await apiClient.post('/model/collect-training-data', data);
+    return response.data;
   },
 };
