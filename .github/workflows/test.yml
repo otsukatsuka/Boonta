@@ -41,6 +41,7 @@ jobs:
           pip install fastapi uvicorn sqlalchemy aiosqlite pydantic pydantic-settings
           pip install httpx beautifulsoup4 lxml pandas numpy
           pip install pytest pytest-asyncio pytest-cov
+          pip install modal
 
       - name: Run tests with coverage
         run: |

@@ -23,35 +23,42 @@ settings = get_settings()
 async def get_model_status(
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current model status."""
-    import os
-    from datetime import datetime as dt
+    """Get current model status from Modal."""
+    from datetime import datetime
 
-    # Check if model exists (AutoGluon place_predictor)
-    model_path = settings.model_path / "place_predictor"
-    is_trained = model_path.exists()
+    from modal_app.client import get_modal_client
 
-    # Default values
-    metrics = None
-    last_trained_at = None
+    # Get training data count from local CSV
     training_data_count = 0
+    csv_path = settings.model_path.parent / "data" / "training" / "g1_races.csv"
+    if csv_path.exists():
+        with open(csv_path) as f:
+            training_data_count = sum(1 for _ in f) - 1  # Subtract header
 
+    # Check Modal for model status
+    is_trained = False
+    last_trained_at = None
+    best_score = None
+
+    try:
+        modal_client = get_modal_client()
+        result = await modal_client.get_model_status()
+        is_trained = result.get("exists", False)
+
+        # Parse trained_at from Modal metadata
+        if result.get("trained_at"):
+            last_trained_at = datetime.fromisoformat(
+                result["trained_at"].replace("Z", "+00:00")
+            )
+
+        best_score = result.get("best_score")
+    except Exception as e:
+        print(f"Modal status check failed: {e}")
+
+    # Use best_score from Modal if available, otherwise use default
+    metrics = None
     if is_trained:
-        # Pre-computed metrics from training (avoid loading heavy model)
-        metrics = {"roc_auc": 0.801}
-
-        # Get training data count from CSV if exists
-        csv_path = settings.model_path.parent / "data" / "training" / "g1_races.csv"
-        if csv_path.exists():
-            # Count lines (header + data)
-            with open(csv_path) as f:
-                training_data_count = sum(1 for _ in f) - 1  # Subtract header
-
-        # Get last modified time from model directory
-        model_file = model_path / "predictor.pkl"
-        if model_file.exists():
-            mtime = os.path.getmtime(model_file)
-            last_trained_at = dt.fromtimestamp(mtime)
+        metrics = {"roc_auc": best_score if best_score else 0.801}
 
     return ModelStatusResponse(
         model_version=settings.model_version,
@@ -62,53 +69,127 @@ async def get_model_status(
     )
 
 
-@router.post("/train")
+class TrainModelRequest(BaseModel):
+    """Request to train the model."""
+
+    time_limit: int = Field(default=1800, description="Training time limit in seconds")
+    presets: str = Field(default="best_quality", description="AutoGluon presets")
+
+
+class TrainModelResponse(BaseModel):
+    """Response from training request."""
+
+    status: str
+    call_id: str | None = None
+    message: str
+
+
+@router.post("/train", response_model=TrainModelResponse)
 async def train_model(
+    request: TrainModelRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Train the prediction model."""
-    # TODO: Implement actual training
-    raise HTTPException(
-        status_code=501,
-        detail="Model training not yet implemented. Use AutoGluon training script.",
-    )
+    """Train the prediction model on Modal."""
+    from modal_app.client import get_modal_client
+
+    # Load training data from local CSV
+    csv_path = settings.model_path.parent / "data" / "training" / "g1_races.csv"
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Training data not found. Collect training data first.",
+        )
+
+    with open(csv_path, encoding="utf-8") as f:
+        training_data_csv = f.read()
+
+    # Trigger training on Modal
+    time_limit = request.time_limit if request else 1800
+    presets = request.presets if request else "best_quality"
+
+    try:
+        modal_client = get_modal_client()
+        result = await modal_client.train(
+            training_data_csv=training_data_csv,
+            time_limit=time_limit,
+            presets=presets,
+        )
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=result.get("error", "Training failed to start"),
+            )
+
+        return TrainModelResponse(
+            status="training_started",
+            call_id=result.get("call_id"),
+            message="Training started on Modal. Use /model/training-status/{call_id} to check progress.",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start training: {str(e)}",
+        )
+
+
+class TrainingStatusResponse(BaseModel):
+    """Response from training status check."""
+
+    status: str  # running, completed, error
+    result: dict | None = None
+    error: str | None = None
+
+
+@router.get("/training-status/{call_id}", response_model=TrainingStatusResponse)
+async def get_training_status(
+    call_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check training job status on Modal."""
+    from modal_app.client import get_modal_client
+
+    try:
+        modal_client = get_modal_client()
+        result = await modal_client.get_training_status(call_id)
+        return TrainingStatusResponse(
+            status=result.get("status", "unknown"),
+            result=result.get("result"),
+            error=result.get("error"),
+        )
+    except Exception as e:
+        return TrainingStatusResponse(
+            status="error",
+            error=str(e),
+        )
 
 
 @router.get("/feature-importance", response_model=FeatureImportanceResponse)
 async def get_feature_importance(
     db: AsyncSession = Depends(get_db),
 ):
-    """Get feature importance from the trained model."""
-    model_path = settings.model_path / "place_predictor"
-    if not model_path.exists():
-        raise HTTPException(status_code=404, detail="Model not trained yet")
+    """Get feature importance from the trained model on Modal."""
+    from modal_app.client import get_modal_client
 
     try:
-        from autogluon.tabular import TabularPredictor
+        modal_client = get_modal_client()
+        result = await modal_client.get_feature_importance()
 
-        predictor = TabularPredictor.load(str(model_path))
-        importance_df = predictor.feature_importance()
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=404,
+                detail=result.get("error", "Model not found"),
+            )
 
-        # Convert DataFrame to list of dicts
-        features = []
-        for name, row in importance_df.iterrows():
-            importance_value = float(row["importance"]) if "importance" in row else float(row.iloc[0])
-            features.append({"name": str(name), "importance": importance_value})
-
-        # Sort by importance descending
-        features.sort(key=lambda x: float(x["importance"]), reverse=True)
-
-        return FeatureImportanceResponse(features=features)
-
-    except ImportError:
-        raise HTTPException(
-            status_code=500,
-            detail="AutoGluon not installed. Cannot load model.",
-        )
+        return FeatureImportanceResponse(features=result["features"])
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load model or compute feature importance: {str(e)}",
+            detail=f"Failed to get feature importance: {str(e)}",
         )
 
 

@@ -107,11 +107,11 @@ export function ModelStatus() {
           モデル学習について
         </h3>
         <p className="text-blue-800 text-sm">
-          モデルの学習は現在CLI経由で行う必要があります。
-          AutoGluonを使用して、過去のレースデータから着順予測モデルを構築します。
+          モデルの学習はModal.com上で実行されます。
+          AutoGluon 1.5.0を使用して、過去のレースデータから着順予測モデルを構築します。
         </p>
         <pre className="mt-3 p-3 bg-blue-100 rounded text-sm text-blue-900 overflow-x-auto">
-          cd backend && python -m app.ml.trainer
+          cd backend && modal run modal_app/functions.py::test_train
         </pre>
       </div>
     </div>

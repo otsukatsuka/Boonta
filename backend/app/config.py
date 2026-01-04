@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Boonta"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     debug: bool = True
 
     # Database
@@ -19,7 +19,11 @@ class Settings(BaseSettings):
 
     # ML Model
     model_path: Path = Path("models")
-    model_version: str = "v2.0.0-ml"  # AutoGluon ML model integrated
+    model_version: str = "v2.1.0-modal"  # Modal + AutoGluon 1.5.0
+
+    # Modal configuration
+    modal_app_name: str = "boonta-ml"
+    modal_volume_name: str = "boonta-models"
 
     # Scraping
     scraping_delay: float = 1.0  # seconds between requests
