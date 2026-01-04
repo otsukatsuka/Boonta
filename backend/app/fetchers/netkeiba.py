@@ -14,6 +14,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from app.fetchers.base import (
     DataFetcher,
     EntryInfo,
+    HorseHistoryStats,
     HorseRunningStyleInfo,
     OddsInfo,
     RaceInfo,
@@ -879,3 +880,139 @@ class NetkeibaFetcher(DataFetcher):
             return "STALKER"
         else:
             return "CLOSER"
+
+    async def calculate_horse_stats(
+        self,
+        horse_id: str,
+        race_date: str | None = None,
+        target_distance: int | None = None,
+        target_venue: str | None = None,
+        target_course_type: str | None = None,
+    ) -> HorseHistoryStats:
+        """
+        Calculate horse performance statistics from past race results.
+
+        This method fetches actual race data and calculates real performance metrics,
+        NOT estimates from odds/popularity.
+
+        Args:
+            horse_id: Netkeiba horse ID
+            race_date: Current race date (YYYY-MM-DD) to filter past results
+            target_distance: Target race distance for aptitude calculation
+            target_venue: Target venue for aptitude calculation
+            target_course_type: Target course type (芝/ダート) for aptitude calculation
+
+        Returns:
+            HorseHistoryStats with actual performance statistics
+        """
+        from datetime import datetime
+
+        # Fetch past results
+        results = await self.fetch_horse_results(horse_id, limit=20)
+
+        if not results:
+            return HorseHistoryStats(horse_id=horse_id)
+
+        # Filter results before the current race date if provided
+        past_results = []
+        for r in results:
+            if race_date:
+                try:
+                    # Parse result date (format: YYYY/MM/DD or YYYY-MM-DD)
+                    result_date = r.race_date.replace("/", "-")
+                    if "/" in r.race_date:
+                        parts = r.race_date.split("/")
+                        result_date = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+
+                    if result_date < race_date:
+                        past_results.append(r)
+                except (ValueError, IndexError):
+                    past_results.append(r)  # Include if can't parse date
+            else:
+                past_results.append(r)
+
+        if not past_results:
+            return HorseHistoryStats(horse_id=horse_id)
+
+        # Calculate basic stats
+        total_races = len(past_results)
+        total_wins = sum(1 for r in past_results if r.position == 1)
+        total_places = sum(1 for r in past_results if 1 <= r.position <= 3)
+
+        # Grade wins (races with G1, G2, G3 in name)
+        grade_wins = sum(
+            1 for r in past_results
+            if r.position == 1 and any(g in r.race_name for g in ["G1", "G2", "G3", "(G"])
+        )
+
+        # Win/place rate
+        win_rate = total_wins / total_races if total_races > 0 else 0.0
+        place_rate = total_places / total_races if total_races > 0 else 0.0
+
+        # Average position in last 5 races
+        last_5 = [r for r in past_results[:5] if r.position > 0]
+        avg_position_last5 = (
+            sum(r.position for r in last_5) / len(last_5)
+            if last_5 else 10.0
+        )
+
+        # Last 3F stats
+        last_3f_values = [r.last_3f for r in past_results if r.last_3f and r.last_3f > 0]
+        best_last_3f = min(last_3f_values) if last_3f_values else None
+        avg_last_3f = (
+            sum(last_3f_values) / len(last_3f_values)
+            if last_3f_values else None
+        )
+
+        # Days since last race
+        days_since_last_race = 365
+        if past_results and race_date:
+            try:
+                last_race_date = past_results[0].race_date.replace("/", "-")
+                if "/" in past_results[0].race_date:
+                    parts = past_results[0].race_date.split("/")
+                    last_race_date = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+
+                current = datetime.strptime(race_date, "%Y-%m-%d")
+                last = datetime.strptime(last_race_date, "%Y-%m-%d")
+                days_since_last_race = (current - last).days
+            except (ValueError, IndexError):
+                pass
+
+        # Aptitude calculations
+        same_distance_place_rate = None
+        same_venue_place_rate = None
+        same_course_type_place_rate = None
+
+        if target_distance:
+            # 同距離±200m
+            same_dist = [r for r in past_results if abs(r.distance - target_distance) <= 200]
+            if same_dist:
+                same_distance_place_rate = sum(1 for r in same_dist if 1 <= r.position <= 3) / len(same_dist)
+
+        if target_venue:
+            same_venue = [r for r in past_results if r.venue == target_venue]
+            if same_venue:
+                same_venue_place_rate = sum(1 for r in same_venue if 1 <= r.position <= 3) / len(same_venue)
+
+        if target_course_type:
+            same_course = [r for r in past_results if r.course_type == target_course_type]
+            if same_course:
+                same_course_type_place_rate = sum(1 for r in same_course if 1 <= r.position <= 3) / len(same_course)
+
+        return HorseHistoryStats(
+            horse_id=horse_id,
+            total_races=total_races,
+            total_wins=total_wins,
+            total_places=total_places,
+            grade_wins=grade_wins,
+            win_rate=round(win_rate, 3),
+            place_rate=round(place_rate, 3),
+            avg_position_last5=round(avg_position_last5, 2),
+            best_last_3f=best_last_3f,
+            avg_last_3f=round(avg_last_3f, 2) if avg_last_3f else None,
+            days_since_last_race=days_since_last_race,
+            same_distance_place_rate=round(same_distance_place_rate, 3) if same_distance_place_rate else None,
+            same_venue_place_rate=round(same_venue_place_rate, 3) if same_venue_place_rate else None,
+            same_course_type_place_rate=round(same_course_type_place_rate, 3) if same_course_type_place_rate else None,
+        )

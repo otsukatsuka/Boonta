@@ -58,69 +58,56 @@ class TestHorseAnalysis:
                 assert analysis.avg_first_corner == expected_corner
 
     @pytest.mark.asyncio
-    async def test_analyze_all_horses_popularity_based_last_3f(self, db_session, test_race, test_entries):
-        """Top 3 popular horses get 33.5s avg, 6+ get 34.5s."""
+    async def test_analyze_all_horses_default_last_3f(self, db_session, test_race, test_entries):
+        """All horses should have same default last_3f (no odds bias)."""
         service = PredictionService(db_session)
         analyses = await service._analyze_all_horses(test_entries, "G1")
 
         for entry in test_entries:
             if entry.horse_id in analyses:
                 analysis = analyses[entry.horse_id]
-                popularity = entry.popularity or 10
-
-                if popularity <= 3:
-                    assert analysis.avg_last_3f == 33.5
-                    assert analysis.best_last_3f == 33.0
-                elif popularity <= 6:
-                    assert analysis.avg_last_3f == 34.0
-                    assert analysis.best_last_3f == 33.5
-                else:
-                    assert analysis.avg_last_3f == 34.5
-                    assert analysis.best_last_3f == 34.0
+                # 全馬同じデフォルト値（オッズ依存なし）
+                assert analysis.avg_last_3f == 34.0
+                assert analysis.best_last_3f == 33.5
 
     @pytest.mark.asyncio
-    async def test_analyze_all_horses_odds_to_win_rate(self, db_session, test_race, test_entries):
-        """win_rate = min(1.0/odds, 0.5)"""
-        service = PredictionService(db_session)
-        analyses = await service._analyze_all_horses(test_entries, "G1")
-
-        for entry in test_entries:
-            if entry.horse_id in analyses and entry.odds:
-                analysis = analyses[entry.horse_id]
-                expected_win_rate = min(1.0 / entry.odds, 0.5)
-                assert abs(analysis.win_rate - expected_win_rate) < 0.001
-
-    @pytest.mark.asyncio
-    async def test_analyze_all_horses_g1_grade_race_wins(self, db_session, test_race, test_entries):
-        """G1: top 10 popularity have wins."""
+    async def test_analyze_all_horses_default_win_rate(self, db_session, test_race, test_entries):
+        """All horses should have same default win_rate (no odds bias)."""
         service = PredictionService(db_session)
         analyses = await service._analyze_all_horses(test_entries, "G1")
 
         for entry in test_entries:
             if entry.horse_id in analyses:
                 analysis = analyses[entry.horse_id]
-                popularity = entry.popularity or 10
-
-                if popularity <= 10:
-                    assert analysis.grade_race_wins >= 1
-                else:
-                    assert analysis.grade_race_wins == 0
+                # 全馬同じデフォルト値（オッズ依存なし）
+                assert analysis.win_rate == 0.10
+                assert analysis.place_rate == 0.25
 
     @pytest.mark.asyncio
-    async def test_analyze_all_horses_g3_grade_race_wins(self, db_session, test_race, test_entries):
-        """G3: only top 5 popularity have wins."""
+    async def test_analyze_all_horses_default_grade_wins(self, db_session, test_race, test_entries):
+        """All horses should have same default grade_wins (no popularity bias)."""
+        service = PredictionService(db_session)
+        analyses = await service._analyze_all_horses(test_entries, "G1")
+
+        for entry in test_entries:
+            if entry.horse_id in analyses:
+                analysis = analyses[entry.horse_id]
+                # 全馬同じデフォルト値（人気依存なし）
+                assert analysis.grade_race_wins == 0
+                assert analysis.has_actual_stats is False
+
+    @pytest.mark.asyncio
+    async def test_analyze_all_horses_keeps_odds_as_reference(self, db_session, test_race, test_entries):
+        """Odds are kept as reference but not used for scoring."""
         service = PredictionService(db_session)
         analyses = await service._analyze_all_horses(test_entries, "G3")
 
         for entry in test_entries:
             if entry.horse_id in analyses:
                 analysis = analyses[entry.horse_id]
-                popularity = entry.popularity or 10
-
-                if popularity <= 5:
-                    assert analysis.grade_race_wins >= 1
-                else:
-                    assert analysis.grade_race_wins == 0
+                # オッズは参考情報として保持
+                assert analysis.odds == entry.odds
+                assert analysis.popularity == entry.popularity
 
 
 class TestEstimateRunningStyle:

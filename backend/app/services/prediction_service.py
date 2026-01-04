@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,18 +58,26 @@ class HorseAnalysis:
     running_style: str  # ESCAPE, FRONT, STALKER, CLOSER
     avg_first_corner: float  # 平均1コーナー通過順
 
-    # 上がり分析
+    # 上がり分析 (実績ベース)
     avg_last_3f: float  # 平均上がり3F
     best_last_3f: float  # ベスト上がり3F
 
-    # 実績
+    # 実績 (実績ベース - オッズからの推定ではない)
     win_rate: float
     place_rate: float  # 複勝率
     grade_race_wins: int  # 重賞勝利数
+    avg_position_last5: float = 5.0  # 直近5走平均着順
 
-    # 今回のレース条件
-    odds: float | None
-    popularity: int | None
+    # 適性
+    same_distance_place_rate: float | None = None
+    same_venue_place_rate: float | None = None
+
+    # 今回のレース条件 (参考情報として保持、スコア計算には使わない)
+    odds: float | None = None
+    popularity: int | None = None
+
+    # 実績データの有無
+    has_actual_stats: bool = False  # 実績データがあるかどうか
 
 
 class PredictionService:
@@ -142,7 +149,14 @@ class PredictionService:
         return self._to_response(prediction)
 
     async def _analyze_all_horses(self, entries: list[RaceEntry], race_grade: str = "G1") -> dict[int, HorseAnalysis]:
-        """Analyze all horses based on entry data and race grade."""
+        """Analyze all horses based on entry data and race grade.
+
+        IMPORTANT: This method now uses DEFAULT VALUES that are NOT biased by odds/popularity.
+        All horses start with similar baseline scores - differentiation comes from:
+        1. Running style fit with predicted pace
+        2. Actual performance data (when available from training data)
+        3. Track/distance aptitude
+        """
         analyses = {}
 
         for entry in entries:
@@ -162,33 +176,25 @@ class PredictionService:
             }
             avg_first_corner = style_to_corner.get(running_style, 8.0)
 
-            # デフォルト値（実際のレースデータがないため推定値）
-            # 人気馬は上がりが速い傾向
-            popularity = entry.popularity or 10
-            if popularity <= 3:
-                avg_last_3f = 33.5
-                best_last_3f = 33.0
-            elif popularity <= 6:
-                avg_last_3f = 34.0
-                best_last_3f = 33.5
-            else:
-                avg_last_3f = 34.5
-                best_last_3f = 34.0
+            # ==========================================
+            # デフォルト値 - オッズ/人気に依存しない！
+            # 全馬同じベースラインからスタート
+            # ==========================================
 
-            # オッズから勝率・複勝率を推定
-            odds = entry.odds or 50.0
-            win_rate = min(1.0 / odds, 0.5) if odds > 0 else 0.05
-            place_rate = min(3.0 / odds, 0.8) if odds > 0 else 0.15
+            # 上がり3F: 全馬同じデフォルト値
+            # (脚質による差はペーススコアで反映)
+            avg_last_3f = 34.0
+            best_last_3f = 33.5
 
-            # グレード別の重賞実績推定
-            # G1: 出走馬は基本的に重賞実績あり
-            # G3: 条件戦上がりも多いため、上位人気のみ実績ありと仮定
-            if race_grade == "G1":
-                grade_race_wins = 1 if popularity <= 10 else 0
-            elif race_grade in ("G2", "G3"):
-                grade_race_wins = 1 if popularity <= 5 else 0
-            else:
-                grade_race_wins = 0
+            # 実績: 全馬同じデフォルト値 (G3平均に近い値)
+            win_rate = 0.10  # 10%
+            place_rate = 0.25  # 25%
+            avg_position_last5 = 5.0
+            grade_race_wins = 0
+
+            # 適性: デフォルトなし（ML or ペースで評価）
+            same_distance_place_rate = None
+            same_venue_place_rate = None
 
             analyses[entry.horse_id] = HorseAnalysis(
                 horse_id=entry.horse_id,
@@ -201,8 +207,12 @@ class PredictionService:
                 win_rate=win_rate,
                 place_rate=place_rate,
                 grade_race_wins=grade_race_wins,
-                odds=entry.odds,
-                popularity=entry.popularity,
+                avg_position_last5=avg_position_last5,
+                same_distance_place_rate=same_distance_place_rate,
+                same_venue_place_rate=same_venue_place_rate,
+                odds=entry.odds,  # 参考情報として保持
+                popularity=entry.popularity,  # 参考情報として保持
+                has_actual_stats=False,  # 実績データなし
             )
 
         return analyses
@@ -280,7 +290,11 @@ class PredictionService:
         analyses: dict[int, HorseAnalysis],
         race,
     ) -> dict[int, float]:
-        """Get ML model predictions for place probability."""
+        """Get ML model predictions for place probability.
+
+        IMPORTANT: This method now provides features WITHOUT odds/popularity.
+        The ML model should be trained without these features as well.
+        """
         predictor = get_ml_predictor()
         if not predictor:
             return {}
@@ -307,21 +321,26 @@ class PredictionService:
             grade_map = {"G1": 1, "G2": 2, "G3": 3, "OP": 4}
             grade_code = grade_map.get(race.grade, 4)
 
-            odds = analysis.odds or 50.0
-            log_odds = np.log(odds + 1) if odds > 0 else 0
-
+            # ==========================================
+            # オッズ関連特徴量を削除！
+            # ==========================================
             row = {
                 "horse_number": analysis.horse_number,
-                "odds": odds,
-                "popularity": analysis.popularity or 10,
+                # "odds": 削除,
+                # "popularity": 削除,
                 "running_style_code": running_style_code,
                 "distance": race.distance,
                 "is_turf": is_turf,
                 "grade_code": grade_code,
                 "weight": entry.weight or 55.0,
-                "log_odds": log_odds,
+                # "log_odds": 削除,
                 "horse_weight": entry.horse_weight or 480,
                 "last_3f": analysis.best_last_3f,
+                # 実績データ (デフォルト値または実際の値)
+                "win_rate": analysis.win_rate,
+                "place_rate": analysis.place_rate,
+                "avg_position_last5": analysis.avg_position_last5,
+                "grade_wins": analysis.grade_race_wins,
             }
             data.append(row)
             horse_ids.append(entry.horse_id)
@@ -353,6 +372,12 @@ class PredictionService:
     ) -> tuple[list[HorsePrediction], bool]:
         """Generate horse rankings considering pace prediction and ML model.
 
+        IMPORTANT: This method NO LONGER uses odds for scoring.
+        Differentiation comes from:
+        1. ML predictions (trained without odds features)
+        2. Pace/running style fit
+        3. Track record (when available)
+
         Returns:
             Tuple of (rankings, use_ml_flag)
         """
@@ -367,55 +392,38 @@ class PredictionService:
             if not analysis:
                 continue
 
-            # 基本スコア（オッズから）
-            if analysis.odds and analysis.odds > 0:
-                base_score = 1.0 / analysis.odds
-            else:
-                base_score = 0.05
+            # ==========================================
+            # オッズベースのbase_scoreを完全削除！
+            # ==========================================
 
-            # 展開スコア（重要！競馬場・馬場状態・枠順を考慮）
+            # 展開スコア（最重要！競馬場・馬場状態・枠順を考慮）
             pace_score = self._calculate_pace_score(analysis, pace, race, entry)
 
-            # 上がり能力スコア
+            # 上がり能力スコア (現状はデフォルト値だが、将来は実績から)
             last_3f_score = self._calculate_last_3f_score(analysis, pace)
 
-            # 実績スコア
+            # 実績スコア (現状はデフォルト値だが、将来は実績から)
             track_record_score = self._calculate_track_record_score(analysis)
 
             # MLスコア（モデルがある場合）
             ml_score = ml_predictions.get(entry.horse_id, 0.0)
 
-            # 総合スコア（ML使用時は重み調整）
+            # 総合スコア
             if use_ml:
+                # MLモデルがある場合: ML予測を重視
                 total_score = (
-                    ml_score * 0.4 +          # ML予測を重視
-                    pace_score * 0.25 +        # 展開適性
-                    last_3f_score * 0.2 +      # 上がり能力
-                    track_record_score * 0.15  # 実績
+                    ml_score * 0.45 +          # ML予測（オッズなし学習）
+                    pace_score * 0.35 +        # 展開適性
+                    last_3f_score * 0.1 +      # 上がり能力
+                    track_record_score * 0.1   # 実績
                 )
             else:
+                # MLモデルがない場合: 展開を最重視
                 total_score = (
-                    base_score * 0.2 +      # オッズは参考程度
-                    pace_score * 0.35 +      # 展開適性を重視
-                    last_3f_score * 0.25 +   # 上がり能力
-                    track_record_score * 0.2  # 実績
+                    pace_score * 0.50 +        # 展開適性を最重視
+                    last_3f_score * 0.25 +     # 上がり能力
+                    track_record_score * 0.25  # 実績
                 )
-
-            # 穴馬判定
-            is_dark_horse = False
-            dark_horse_reason = None
-            if analysis.popularity and analysis.popularity >= 6:
-                # 人気薄だがスコアが高い
-                if total_score >= 0.15:
-                    is_dark_horse = True
-                    reasons = []
-                    if pace_score >= 0.25:
-                        reasons.append("展開向く")
-                    if analysis.best_last_3f <= 33.5:
-                        reasons.append("上がり能力高い")
-                    if analysis.grade_race_wins > 0:
-                        reasons.append("重賞実績あり")
-                    dark_horse_reason = "・".join(reasons) if reasons else "好走の可能性"
 
             rankings.append(HorsePrediction(
                 rank=1,  # 後でソートして更新
@@ -427,8 +435,8 @@ class PredictionService:
                 place_probability=min(total_score * 1.2, 0.85),
                 popularity=analysis.popularity,
                 odds=analysis.odds,
-                is_dark_horse=is_dark_horse,
-                dark_horse_reason=dark_horse_reason,
+                is_dark_horse=False,  # 後で相対順位で判定
+                dark_horse_reason=None,
             ))
 
         # スコアでソートしてランク付け
@@ -436,7 +444,60 @@ class PredictionService:
         for i, r in enumerate(rankings):
             r.rank = i + 1
 
+        # ==========================================
+        # 穴馬判定: 相対順位ベースに変更
+        # ==========================================
+        self._mark_dark_horses(rankings, analyses, pace)
+
         return rankings, use_ml
+
+    def _mark_dark_horses(
+        self,
+        rankings: list[HorsePrediction],
+        analyses: dict[int, HorseAnalysis],
+        pace: PacePrediction,
+    ) -> None:
+        """Mark dark horses based on relative ranking vs popularity.
+
+        Dark horse criteria:
+        - 人気より予測順位が大幅に上 (人気 - 予測順位 >= 3)
+        - または、人気7位以下でスコア上位50%に入っている
+        """
+        if len(rankings) < 3:
+            return
+
+        # スコアの中央値を計算
+        scores = sorted([r.score for r in rankings], reverse=True)
+        median_score = scores[len(scores) // 2]
+
+        for r in rankings:
+            analysis = analyses.get(r.horse_id)
+            if not analysis or not r.popularity:
+                continue
+
+            # 条件1: 人気より順位が大幅に上
+            popularity_gap = r.popularity - r.rank
+            is_gap_horse = popularity_gap >= 3
+
+            # 条件2: 人気薄でスコア上位50%
+            is_value_horse = r.popularity >= 7 and r.score >= median_score
+
+            if is_gap_horse or is_value_horse:
+                r.is_dark_horse = True
+                reasons = []
+
+                # 展開面
+                if analysis.running_style in pace.advantageous_styles:
+                    if analysis.running_style == pace.advantageous_styles[0]:
+                        reasons.append("展開最有利")
+                    else:
+                        reasons.append("展開向く")
+
+                # 順位ギャップ
+                if is_gap_horse:
+                    reasons.append(f"人気{r.popularity}→予測{r.rank}位")
+
+                r.dark_horse_reason = "・".join(reasons) if reasons else "好走の可能性"
 
     def _calculate_pace_score(
         self,
@@ -636,28 +697,44 @@ class PredictionService:
     ) -> HorsePrediction:
         """期待値最高の穴馬を選定する.
 
-        条件:
-        - 人気8位以下
-        - オッズ20倍以上
-        - スコア0.18以上
+        NEW CRITERIA (オッズ依存を軽減):
+        - is_dark_horse=True (相対順位ベースで判定済み)
+        - または、人気6位以下でスコア上位40%
+        - 展開有利なら優先
         """
+        if len(rankings) < 2:
+            return rankings[0]
+
+        # スコア上位40%の閾値
+        scores = sorted([r.score for r in rankings], reverse=True)
+        top_40_threshold = scores[max(0, int(len(scores) * 0.4) - 1)]
+
         candidates = []
         for r in rankings:
-            if (
-                r.popularity
-                and r.popularity >= 8
-                and r.odds
-                and r.odds >= 20
-                and r.score >= 0.18
-            ):
-                analysis = analyses.get(r.horse_number)
+            if not r.popularity:
+                continue
+
+            # 条件1: すでにdark_horseとしてマーク済み
+            # 条件2: 人気6位以下でスコア上位40%
+            is_candidate = r.is_dark_horse or (
+                r.popularity >= 6 and r.score >= top_40_threshold
+            )
+
+            if is_candidate:
+                analysis = analyses.get(r.horse_id)
                 if analysis:
-                    pace_fit = (
-                        1.0
-                        if analysis.running_style in pace.advantageous_styles
-                        else 0.5
-                    )
-                    expected_return = r.odds * r.score * pace_fit
+                    # 展開フィットボーナス
+                    pace_fit = 1.0
+                    if analysis.running_style in pace.advantageous_styles:
+                        if analysis.running_style == pace.advantageous_styles[0]:
+                            pace_fit = 1.5  # 最有利脚質
+                        else:
+                            pace_fit = 1.2
+
+                    # オッズは期待値計算にのみ使用（スコアには影響させない）
+                    odds = r.odds or 10.0
+                    expected_return = odds * r.score * pace_fit
+
                     candidates.append((r, expected_return))
 
         # 期待値最高の穴馬を返す
@@ -665,7 +742,7 @@ class PredictionService:
             candidates.sort(key=lambda x: x[1], reverse=True)
             return candidates[0][0]
 
-        # 穴馬がいない場合はスコア2位を返す
+        # 穴馬がいない場合はスコア2位を返す（人気馬でもOK）
         return rankings[1] if len(rankings) > 1 else rankings[0]
 
     def _calculate_confidence(
