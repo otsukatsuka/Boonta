@@ -23,53 +23,45 @@ export interface PacePrediction {
   front_count: number;
 }
 
-export interface TrifectaBet {
-  type: string;
-  first: number[];
-  second: number[];
-  third: number[];
+// 三連複（新形式: 軸2頭流し）
+export interface TrioBetNew {
+  type: 'pivot_2_nagashi';
+  pivots: number[];
+  others: number[];
   combinations: number;
   amount_per_ticket: number;
 }
 
-export interface TrioBet {
+// 三連複（旧形式: ボックス）
+export interface TrioBetOld {
   type: string;
   horses: number[];
   combinations: number;
   amount_per_ticket: number;
 }
 
-export interface ExactaBet {
-  type: string;
-  first: number;
-  second: number[];
+// 三連単2頭軸マルチ（新形式）
+export interface TrifectaMultiBet {
+  type: 'pivot_2_multi';
+  pivots: number[];
+  others: number[];
   combinations: number;
   amount_per_ticket: number;
 }
 
-export interface WideBet {
-  pairs: number[][];
-  note: string;
-  amount_per_ticket: number;
-}
-
-export interface HighRiskBet {
-  bet_type: string;
-  horses: number[];
-  expected_return: number;
-  risk_level: 'medium' | 'high' | 'very_high';
-  reason: string;
-  amount: number;
-}
-
+// 両形式に対応
 export interface BetRecommendation {
-  trifecta: TrifectaBet | null;
-  trio: TrioBet | null;
-  exacta: ExactaBet | null;
-  wide: WideBet | null;
+  // 新形式
+  trio?: TrioBetNew | TrioBetOld | null;
+  trifecta_multi?: TrifectaMultiBet | null;
+  // 旧形式（後方互換性）
+  trifecta?: any;
+  exacta?: any;
+  wide?: any;
+  high_risk_bets?: any[];
+  // 共通
   total_investment: number;
   note: string | null;
-  high_risk_bets: HighRiskBet[] | null;
 }
 
 export interface PredictionResponse {
@@ -124,17 +116,4 @@ export const PACE_COLORS: Record<PacePrediction['type'], string> = {
   slow: '#22c55e',
   middle: '#eab308',
   high: '#ef4444',
-};
-
-// Risk level labels and colors
-export const RISK_LABELS: Record<HighRiskBet['risk_level'], string> = {
-  medium: '中リスク',
-  high: '高リスク',
-  very_high: '超高リスク',
-};
-
-export const RISK_COLORS: Record<HighRiskBet['risk_level'], string> = {
-  medium: 'bg-yellow-100 text-yellow-800',
-  high: 'bg-orange-100 text-orange-800',
-  very_high: 'bg-red-100 text-red-800',
 };
