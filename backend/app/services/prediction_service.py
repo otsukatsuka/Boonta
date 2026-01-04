@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +12,6 @@ from app.models import Prediction, RaceEntry
 from app.repositories import EntryRepository, PredictionRepository, RaceRepository
 from app.schemas import (
     BetRecommendation,
-    HighRiskBet,
     HorsePrediction,
     PacePrediction,
     PredictionResponse,
@@ -60,18 +58,26 @@ class HorseAnalysis:
     running_style: str  # ESCAPE, FRONT, STALKER, CLOSER
     avg_first_corner: float  # 平均1コーナー通過順
 
-    # 上がり分析
+    # 上がり分析 (実績ベース)
     avg_last_3f: float  # 平均上がり3F
     best_last_3f: float  # ベスト上がり3F
 
-    # 実績
+    # 実績 (実績ベース - オッズからの推定ではない)
     win_rate: float
     place_rate: float  # 複勝率
     grade_race_wins: int  # 重賞勝利数
+    avg_position_last5: float = 5.0  # 直近5走平均着順
 
-    # 今回のレース条件
-    odds: float | None
-    popularity: int | None
+    # 適性
+    same_distance_place_rate: float | None = None
+    same_venue_place_rate: float | None = None
+
+    # 今回のレース条件 (参考情報として保持、スコア計算には使わない)
+    odds: float | None = None
+    popularity: int | None = None
+
+    # 実績データの有無
+    has_actual_stats: bool = False  # 実績データがあるかどうか
 
 
 class PredictionService:
@@ -143,7 +149,14 @@ class PredictionService:
         return self._to_response(prediction)
 
     async def _analyze_all_horses(self, entries: list[RaceEntry], race_grade: str = "G1") -> dict[int, HorseAnalysis]:
-        """Analyze all horses based on entry data and race grade."""
+        """Analyze all horses based on entry data and race grade.
+
+        IMPORTANT: This method now uses DEFAULT VALUES that are NOT biased by odds/popularity.
+        All horses start with similar baseline scores - differentiation comes from:
+        1. Running style fit with predicted pace
+        2. Actual performance data (when available from training data)
+        3. Track/distance aptitude
+        """
         analyses = {}
 
         for entry in entries:
@@ -163,33 +176,25 @@ class PredictionService:
             }
             avg_first_corner = style_to_corner.get(running_style, 8.0)
 
-            # デフォルト値（実際のレースデータがないため推定値）
-            # 人気馬は上がりが速い傾向
-            popularity = entry.popularity or 10
-            if popularity <= 3:
-                avg_last_3f = 33.5
-                best_last_3f = 33.0
-            elif popularity <= 6:
-                avg_last_3f = 34.0
-                best_last_3f = 33.5
-            else:
-                avg_last_3f = 34.5
-                best_last_3f = 34.0
+            # ==========================================
+            # デフォルト値 - オッズ/人気に依存しない！
+            # 全馬同じベースラインからスタート
+            # ==========================================
 
-            # オッズから勝率・複勝率を推定
-            odds = entry.odds or 50.0
-            win_rate = min(1.0 / odds, 0.5) if odds > 0 else 0.05
-            place_rate = min(3.0 / odds, 0.8) if odds > 0 else 0.15
+            # 上がり3F: 全馬同じデフォルト値
+            # (脚質による差はペーススコアで反映)
+            avg_last_3f = 34.0
+            best_last_3f = 33.5
 
-            # グレード別の重賞実績推定
-            # G1: 出走馬は基本的に重賞実績あり
-            # G3: 条件戦上がりも多いため、上位人気のみ実績ありと仮定
-            if race_grade == "G1":
-                grade_race_wins = 1 if popularity <= 10 else 0
-            elif race_grade in ("G2", "G3"):
-                grade_race_wins = 1 if popularity <= 5 else 0
-            else:
-                grade_race_wins = 0
+            # 実績: 全馬同じデフォルト値 (G3平均に近い値)
+            win_rate = 0.10  # 10%
+            place_rate = 0.25  # 25%
+            avg_position_last5 = 5.0
+            grade_race_wins = 0
+
+            # 適性: デフォルトなし（ML or ペースで評価）
+            same_distance_place_rate = None
+            same_venue_place_rate = None
 
             analyses[entry.horse_id] = HorseAnalysis(
                 horse_id=entry.horse_id,
@@ -202,8 +207,12 @@ class PredictionService:
                 win_rate=win_rate,
                 place_rate=place_rate,
                 grade_race_wins=grade_race_wins,
-                odds=entry.odds,
-                popularity=entry.popularity,
+                avg_position_last5=avg_position_last5,
+                same_distance_place_rate=same_distance_place_rate,
+                same_venue_place_rate=same_venue_place_rate,
+                odds=entry.odds,  # 参考情報として保持
+                popularity=entry.popularity,  # 参考情報として保持
+                has_actual_stats=False,  # 実績データなし
             )
 
         return analyses
@@ -281,7 +290,11 @@ class PredictionService:
         analyses: dict[int, HorseAnalysis],
         race,
     ) -> dict[int, float]:
-        """Get ML model predictions for place probability."""
+        """Get ML model predictions for place probability.
+
+        IMPORTANT: This method now provides features WITHOUT odds/popularity.
+        The ML model should be trained without these features as well.
+        """
         predictor = get_ml_predictor()
         if not predictor:
             return {}
@@ -308,21 +321,26 @@ class PredictionService:
             grade_map = {"G1": 1, "G2": 2, "G3": 3, "OP": 4}
             grade_code = grade_map.get(race.grade, 4)
 
-            odds = analysis.odds or 50.0
-            log_odds = np.log(odds + 1) if odds > 0 else 0
-
+            # ==========================================
+            # オッズ関連特徴量を削除！
+            # ==========================================
             row = {
                 "horse_number": analysis.horse_number,
-                "odds": odds,
-                "popularity": analysis.popularity or 10,
+                # "odds": 削除,
+                # "popularity": 削除,
                 "running_style_code": running_style_code,
                 "distance": race.distance,
                 "is_turf": is_turf,
                 "grade_code": grade_code,
                 "weight": entry.weight or 55.0,
-                "log_odds": log_odds,
+                # "log_odds": 削除,
                 "horse_weight": entry.horse_weight or 480,
                 "last_3f": analysis.best_last_3f,
+                # 実績データ (デフォルト値または実際の値)
+                "win_rate": analysis.win_rate,
+                "place_rate": analysis.place_rate,
+                "avg_position_last5": analysis.avg_position_last5,
+                "grade_wins": analysis.grade_race_wins,
             }
             data.append(row)
             horse_ids.append(entry.horse_id)
@@ -354,6 +372,12 @@ class PredictionService:
     ) -> tuple[list[HorsePrediction], bool]:
         """Generate horse rankings considering pace prediction and ML model.
 
+        IMPORTANT: This method NO LONGER uses odds for scoring.
+        Differentiation comes from:
+        1. ML predictions (trained without odds features)
+        2. Pace/running style fit
+        3. Track record (when available)
+
         Returns:
             Tuple of (rankings, use_ml_flag)
         """
@@ -368,55 +392,38 @@ class PredictionService:
             if not analysis:
                 continue
 
-            # 基本スコア（オッズから）
-            if analysis.odds and analysis.odds > 0:
-                base_score = 1.0 / analysis.odds
-            else:
-                base_score = 0.05
+            # ==========================================
+            # オッズベースのbase_scoreを完全削除！
+            # ==========================================
 
-            # 展開スコア（重要！競馬場・馬場状態・枠順を考慮）
+            # 展開スコア（最重要！競馬場・馬場状態・枠順を考慮）
             pace_score = self._calculate_pace_score(analysis, pace, race, entry)
 
-            # 上がり能力スコア
+            # 上がり能力スコア (現状はデフォルト値だが、将来は実績から)
             last_3f_score = self._calculate_last_3f_score(analysis, pace)
 
-            # 実績スコア
+            # 実績スコア (現状はデフォルト値だが、将来は実績から)
             track_record_score = self._calculate_track_record_score(analysis)
 
             # MLスコア（モデルがある場合）
             ml_score = ml_predictions.get(entry.horse_id, 0.0)
 
-            # 総合スコア（ML使用時は重み調整）
+            # 総合スコア
             if use_ml:
+                # MLモデルがある場合: ML予測を重視
                 total_score = (
-                    ml_score * 0.4 +          # ML予測を重視
-                    pace_score * 0.25 +        # 展開適性
-                    last_3f_score * 0.2 +      # 上がり能力
-                    track_record_score * 0.15  # 実績
+                    ml_score * 0.45 +          # ML予測（オッズなし学習）
+                    pace_score * 0.35 +        # 展開適性
+                    last_3f_score * 0.1 +      # 上がり能力
+                    track_record_score * 0.1   # 実績
                 )
             else:
+                # MLモデルがない場合: 展開を最重視
                 total_score = (
-                    base_score * 0.2 +      # オッズは参考程度
-                    pace_score * 0.35 +      # 展開適性を重視
-                    last_3f_score * 0.25 +   # 上がり能力
-                    track_record_score * 0.2  # 実績
+                    pace_score * 0.50 +        # 展開適性を最重視
+                    last_3f_score * 0.25 +     # 上がり能力
+                    track_record_score * 0.25  # 実績
                 )
-
-            # 穴馬判定
-            is_dark_horse = False
-            dark_horse_reason = None
-            if analysis.popularity and analysis.popularity >= 6:
-                # 人気薄だがスコアが高い
-                if total_score >= 0.15:
-                    is_dark_horse = True
-                    reasons = []
-                    if pace_score >= 0.25:
-                        reasons.append("展開向く")
-                    if analysis.best_last_3f <= 33.5:
-                        reasons.append("上がり能力高い")
-                    if analysis.grade_race_wins > 0:
-                        reasons.append("重賞実績あり")
-                    dark_horse_reason = "・".join(reasons) if reasons else "好走の可能性"
 
             rankings.append(HorsePrediction(
                 rank=1,  # 後でソートして更新
@@ -428,8 +435,8 @@ class PredictionService:
                 place_probability=min(total_score * 1.2, 0.85),
                 popularity=analysis.popularity,
                 odds=analysis.odds,
-                is_dark_horse=is_dark_horse,
-                dark_horse_reason=dark_horse_reason,
+                is_dark_horse=False,  # 後で相対順位で判定
+                dark_horse_reason=None,
             ))
 
         # スコアでソートしてランク付け
@@ -437,7 +444,60 @@ class PredictionService:
         for i, r in enumerate(rankings):
             r.rank = i + 1
 
+        # ==========================================
+        # 穴馬判定: 相対順位ベースに変更
+        # ==========================================
+        self._mark_dark_horses(rankings, analyses, pace)
+
         return rankings, use_ml
+
+    def _mark_dark_horses(
+        self,
+        rankings: list[HorsePrediction],
+        analyses: dict[int, HorseAnalysis],
+        pace: PacePrediction,
+    ) -> None:
+        """Mark dark horses based on relative ranking vs popularity.
+
+        Dark horse criteria:
+        - 人気より予測順位が大幅に上 (人気 - 予測順位 >= 3)
+        - または、人気7位以下でスコア上位50%に入っている
+        """
+        if len(rankings) < 3:
+            return
+
+        # スコアの中央値を計算
+        scores = sorted([r.score for r in rankings], reverse=True)
+        median_score = scores[len(scores) // 2]
+
+        for r in rankings:
+            analysis = analyses.get(r.horse_id)
+            if not analysis or not r.popularity:
+                continue
+
+            # 条件1: 人気より順位が大幅に上
+            popularity_gap = r.popularity - r.rank
+            is_gap_horse = popularity_gap >= 3
+
+            # 条件2: 人気薄でスコア上位50%
+            is_value_horse = r.popularity >= 7 and r.score >= median_score
+
+            if is_gap_horse or is_value_horse:
+                r.is_dark_horse = True
+                reasons = []
+
+                # 展開面
+                if analysis.running_style in pace.advantageous_styles:
+                    if analysis.running_style == pace.advantageous_styles[0]:
+                        reasons.append("展開最有利")
+                    else:
+                        reasons.append("展開向く")
+
+                # 順位ギャップ
+                if is_gap_horse:
+                    reasons.append(f"人気{r.popularity}→予測{r.rank}位")
+
+                r.dark_horse_reason = "・".join(reasons) if reasons else "好走の可能性"
 
     def _calculate_pace_score(
         self,
@@ -561,63 +621,53 @@ class PredictionService:
         analyses: dict[int, HorseAnalysis],
         race=None,
     ) -> BetRecommendation:
-        """Generate bet recommendations."""
+        """Generate bet recommendations - 三連複と三連単2頭軸マルチのみ."""
         if len(rankings) < 3:
             return BetRecommendation(total_investment=0)
 
-        top_horses = [r.horse_number for r in rankings[:2]]
-        counter_horses = [r.horse_number for r in rankings[2:6]]
-        dark_horses = [r.horse_number for r in rankings if r.is_dark_horse][:2]
+        # 軸の選定: 本命（スコア1位）+ 穴馬（期待値最高）
+        pivot1 = rankings[0]  # 本命
+        pivot2 = self._select_best_dark_horse(rankings, analyses, pace)
 
-        all_horses = list(dict.fromkeys(top_horses + counter_horses[:2] + dark_horses))
+        # 相手の選定（スコア2-5位から軸穴馬を除く）
+        others_trio = [
+            r for r in rankings[1:6]
+            if r.horse_number != pivot2.horse_number
+        ][:4]
+        others_trifecta = [
+            r for r in rankings[1:5]
+            if r.horse_number != pivot2.horse_number
+        ][:3]
 
-        trifecta = {
-            "type": "formation",
-            "first": top_horses,
-            "second": list(dict.fromkeys(top_horses + counter_horses[:2])),
-            "third": all_horses,
-            "combinations": len(top_horses) * len(set(top_horses + counter_horses[:2])) * len(all_horses),
-            "amount_per_ticket": 100,
-        }
-
+        # 三連複（軸2頭流し）: 4点 × 1,000円 = 4,000円
         trio = {
-            "type": "box",
-            "horses": all_horses[:5],
-            "combinations": 10,
-            "amount_per_ticket": 300,
+            "type": "pivot_2_nagashi",
+            "pivots": [pivot1.horse_number, pivot2.horse_number],
+            "others": [r.horse_number for r in others_trio],
+            "combinations": len(others_trio),
+            "amount_per_ticket": 1000,
         }
 
-        exacta = None
-        if rankings[0].score > 0.25:
-            exacta = {
-                "type": "first_to_others",
-                "first": rankings[0].horse_number,
-                "second": [r.horse_number for r in rankings[1:4]],
-                "combinations": 3,
-                "amount_per_ticket": 500,
-            }
-
-        wide = None
-        if dark_horses:
-            wide = {
-                "pairs": [[dark_horses[0], top_horses[0]]],
-                "note": f"穴馬{dark_horses[0]}番絡み",
-                "amount_per_ticket": 200,
-            }
+        # 三連単2頭軸マルチ: 18点 × 200円 = 3,600円
+        # マルチ = 軸2頭の順番を問わない（6パターン × 相手数）
+        trifecta_multi = {
+            "type": "pivot_2_multi",
+            "pivots": [pivot1.horse_number, pivot2.horse_number],
+            "others": [r.horse_number for r in others_trifecta],
+            "combinations": len(others_trifecta) * 6,
+            "amount_per_ticket": 200,
+        }
 
         total = (
-            trifecta["combinations"] * trifecta["amount_per_ticket"]
-            + trio["combinations"] * trio["amount_per_ticket"]
-            + (exacta["combinations"] * exacta["amount_per_ticket"] if exacta else 0)
-            + (len(wide["pairs"]) * wide["amount_per_ticket"] if wide else 0)
+            trio["combinations"] * trio["amount_per_ticket"]
+            + trifecta_multi["combinations"] * trifecta_multi["amount_per_ticket"]
         )
 
-        # ハイリスクハイリターン買い目を生成
-        high_risk_bets = self._generate_high_risk_bets(rankings, pace, analyses)
-
-        # 買い目のnoteを生成（馬場状態を含む）
+        # noteを生成
         pace_labels = {"high": "ハイ", "middle": "ミドル", "slow": "スロー"}
-        note_parts = [f"軸: {top_horses[0]},{top_horses[1]}番"]
+        note_parts = [
+            f"軸: {pivot1.horse_number}番(本命)+{pivot2.horse_number}番(穴)"
+        ]
         note_parts.append(f"展開: {pace_labels.get(pace.type, pace.type)}ペース予想")
 
         if race:
@@ -633,162 +683,67 @@ class PredictionService:
                 note_parts.append(f"【{race.track_condition}馬場】前残り警戒")
 
         return BetRecommendation(
-            trifecta=trifecta,
             trio=trio,
-            exacta=exacta,
-            wide=wide,
+            trifecta_multi=trifecta_multi,
             total_investment=total,
             note=" / ".join(note_parts),
-            high_risk_bets=high_risk_bets,
         )
 
-    def _generate_high_risk_bets(
+    def _select_best_dark_horse(
         self,
         rankings: list[HorsePrediction],
-        pace: PacePrediction,
         analyses: dict[int, HorseAnalysis],
-    ) -> list[HighRiskBet]:
-        """Generate high-risk high-return bet recommendations.
+        pace: PacePrediction,
+    ) -> HorsePrediction:
+        """期待値最高の穴馬を選定する.
 
-        穴馬を中心としたハイリスクハイリターンな買い目を生成する。
-        期待値と展開適性を考慮して選定。
+        NEW CRITERIA (オッズ依存を軽減):
+        - is_dark_horse=True (相対順位ベースで判定済み)
+        - または、人気6位以下でスコア上位40%
+        - 展開有利なら優先
         """
-        high_risk_bets = []
+        if len(rankings) < 2:
+            return rankings[0]
 
-        # 穴馬候補を抽出（人気6番手以下でスコアが高い馬）
-        dark_horse_candidates = []
+        # スコア上位40%の閾値
+        scores = sorted([r.score for r in rankings], reverse=True)
+        top_40_threshold = scores[max(0, int(len(scores) * 0.4) - 1)]
+
+        candidates = []
         for r in rankings:
-            if r.popularity and r.popularity >= 6:
-                analysis = next((a for a in analyses.values() if a.horse_number == r.horse_number), None)
+            if not r.popularity:
+                continue
+
+            # 条件1: すでにdark_horseとしてマーク済み
+            # 条件2: 人気6位以下でスコア上位40%
+            is_candidate = r.is_dark_horse or (
+                r.popularity >= 6 and r.score >= top_40_threshold
+            )
+
+            if is_candidate:
+                analysis = analyses.get(r.horse_id)
                 if analysis:
-                    # 展開適性スコアを計算
-                    pace_fit = 1.0 if analysis.running_style in pace.advantageous_styles else 0.5
-                    expected_return = (r.odds or 10.0) * r.score * pace_fit
-                    dark_horse_candidates.append({
-                        "ranking": r,
-                        "analysis": analysis,
-                        "expected_return": expected_return,
-                        "pace_fit": pace_fit,
-                    })
+                    # 展開フィットボーナス
+                    pace_fit = 1.0
+                    if analysis.running_style in pace.advantageous_styles:
+                        if analysis.running_style == pace.advantageous_styles[0]:
+                            pace_fit = 1.5  # 最有利脚質
+                        else:
+                            pace_fit = 1.2
 
-        # 期待リターン順にソート
-        dark_horse_candidates.sort(key=lambda x: x["expected_return"], reverse=True)
+                    # オッズは期待値計算にのみ使用（スコアには影響させない）
+                    odds = r.odds or 10.0
+                    expected_return = odds * r.score * pace_fit
 
-        # 上位3頭の穴馬をピックアップ
-        top_dark_horses = dark_horse_candidates[:3]
+                    candidates.append((r, expected_return))
 
-        if not top_dark_horses:
-            return high_risk_bets
+        # 期待値最高の穴馬を返す
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            return candidates[0][0]
 
-        # 人気上位馬（軸になりうる馬）
-        favorites = [r for r in rankings[:3]]
-
-        # 1. 穴馬単勝（最も期待値の高い穴馬）
-        if top_dark_horses:
-            dh = top_dark_horses[0]
-            r = dh["ranking"]
-            a = dh["analysis"]
-            style_ja = {"ESCAPE": "逃げ", "FRONT": "先行", "STALKER": "差し", "CLOSER": "追込", "VERSATILE": "自在"}
-
-            reason_parts = []
-            if a.running_style in pace.advantageous_styles:
-                reason_parts.append(f"展開◎({style_ja.get(a.running_style, '?')}有利)")
-            if r.score >= 0.15:
-                reason_parts.append("高スコア")
-            if r.odds and r.odds >= 20:
-                reason_parts.append(f"高配当期待({r.odds:.1f}倍)")
-
-            high_risk_bets.append(HighRiskBet(
-                bet_type="単勝",
-                horses=[r.horse_number],
-                expected_return=dh["expected_return"],
-                risk_level="very_high",
-                reason=f"{r.horse_name}: " + "・".join(reason_parts) if reason_parts else "穴馬候補",
-                amount=200,
-            ))
-
-        # 2. 穴馬ワイド（穴馬 × 人気馬）
-        if top_dark_horses and favorites:
-            dh = top_dark_horses[0]
-            r = dh["ranking"]
-            fav = favorites[0]
-
-            # ワイドの期待配当を計算（単勝オッズの約1/3〜1/4が目安）
-            estimated_wide_odds = (r.odds or 10.0) * 0.3
-            expected_return = estimated_wide_odds * r.score * 1.5  # ワイドは的中率高め
-
-            high_risk_bets.append(HighRiskBet(
-                bet_type="ワイド",
-                horses=[r.horse_number, fav.horse_number],
-                expected_return=expected_return,
-                risk_level="medium",
-                reason=f"本命{fav.horse_number}番×穴馬{r.horse_number}番 展開次第で高配当",
-                amount=300,
-            ))
-
-        # 3. 穴馬三連複（穴馬2頭 + 人気馬1頭）
-        if len(top_dark_horses) >= 2 and favorites:
-            dh1 = top_dark_horses[0]["ranking"]
-            dh2 = top_dark_horses[1]["ranking"]
-            fav = favorites[0]
-
-            # 三連複の期待配当
-            min_odds = min(dh1.odds or 10, dh2.odds or 10)
-            estimated_trio_odds = min_odds * 3
-            avg_score = (dh1.score + dh2.score + fav.score) / 3
-            expected_return = estimated_trio_odds * avg_score
-
-            high_risk_bets.append(HighRiskBet(
-                bet_type="三連複",
-                horses=[dh1.horse_number, dh2.horse_number, fav.horse_number],
-                expected_return=expected_return,
-                risk_level="high",
-                reason=f"穴馬2頭({dh1.horse_number},{dh2.horse_number}番)＋本命{fav.horse_number}番",
-                amount=200,
-            ))
-
-        # 4. 穴馬馬単（穴馬 → 人気馬）- 展開向く馬のみ
-        pace_fit_dark_horses = [dh for dh in top_dark_horses if dh["pace_fit"] >= 1.0]
-        if pace_fit_dark_horses and favorites:
-            dh = pace_fit_dark_horses[0]
-            r = dh["ranking"]
-            fav = favorites[0]
-
-            estimated_exacta_odds = (r.odds or 10.0) * 0.8
-            expected_return = estimated_exacta_odds * r.score * dh["pace_fit"]
-
-            high_risk_bets.append(HighRiskBet(
-                bet_type="馬単",
-                horses=[r.horse_number, fav.horse_number],
-                expected_return=expected_return,
-                risk_level="very_high",
-                reason=f"展開向く穴馬{r.horse_number}番から本命{fav.horse_number}番へ 大波乱狙い",
-                amount=100,
-            ))
-
-        # 5. 穴馬三連単フォーメーション（超高配当狙い）
-        if len(top_dark_horses) >= 2 and len(favorites) >= 2:
-            dh_nums = [dh["ranking"].horse_number for dh in top_dark_horses[:2]]
-            fav_nums = [f.horse_number for f in favorites[:2]]
-
-            # 穴馬を1着固定
-            dh1 = top_dark_horses[0]["ranking"]
-            estimated_trifecta_odds = (dh1.odds or 10.0) * 5  # 三連単は単勝の約5倍以上
-            expected_return = estimated_trifecta_odds * dh1.score
-
-            high_risk_bets.append(HighRiskBet(
-                bet_type="三連単",
-                horses=dh_nums + fav_nums,
-                expected_return=expected_return,
-                risk_level="very_high",
-                reason=f"1着:{dh_nums[0]}番(穴) → 2着:{fav_nums}+{dh_nums[1:]} → 3着:ボックス 万馬券狙い",
-                amount=100,
-            ))
-
-        # 期待リターン順にソート
-        high_risk_bets.sort(key=lambda x: x.expected_return, reverse=True)
-
-        return high_risk_bets
+        # 穴馬がいない場合はスコア2位を返す（人気馬でもOK）
+        return rankings[1] if len(rankings) > 1 else rankings[0]
 
     def _calculate_confidence(
         self,

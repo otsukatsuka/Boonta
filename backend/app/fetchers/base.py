@@ -95,6 +95,31 @@ class HorseRunningStyleInfo:
     race_count: int  # 分析レース数
 
 
+@dataclass
+class HorseHistoryStats:
+    """Horse performance statistics calculated from past race results.
+
+    These are ACTUAL performance stats, not estimates from odds/popularity.
+    """
+
+    horse_id: str
+    total_races: int = 0
+    total_wins: int = 0
+    total_places: int = 0  # 3着以内
+    grade_wins: int = 0  # 重賞勝利
+    win_rate: float = 0.0
+    place_rate: float = 0.0
+    avg_position_last5: float = 10.0
+    best_last_3f: float | None = None
+    avg_last_3f: float | None = None
+    days_since_last_race: int = 365
+
+    # コース適性
+    same_distance_place_rate: float | None = None  # 同距離での複勝率
+    same_venue_place_rate: float | None = None  # 同競馬場での複勝率
+    same_course_type_place_rate: float | None = None  # 同コース種別(芝/ダ)での複勝率
+
+
 class DataFetcher(ABC):
     """Base class for external data fetchers."""
 
