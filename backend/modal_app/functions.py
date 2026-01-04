@@ -45,9 +45,6 @@ VOLUME_PATH = "/models"
 
 def preprocess_features(df):
     """Preprocess features for model training/prediction."""
-    import numpy as np
-    import pandas as pd
-
     df = df.copy()
 
     categorical_cols = [
@@ -123,6 +120,8 @@ def train_model(
     presets: str = "best_quality",
 ) -> dict:
     """Train AutoGluon model on Modal."""
+    from datetime import datetime, timezone
+
     import pandas as pd
     from autogluon.tabular import TabularPredictor
 
@@ -162,8 +161,23 @@ def train_model(
     )
 
     leaderboard = predictor.leaderboard()
+    best_score = float(leaderboard.iloc[0]["score_val"]) if len(leaderboard) > 0 else None
 
-    # Commit volume to persist model
+    # Save training metadata
+    trained_at = datetime.now(timezone.utc).isoformat()
+    metadata = {
+        "trained_at": trained_at,
+        "num_samples": len(df),
+        "presets": presets,
+        "best_model": str(leaderboard.iloc[0]["model"]) if len(leaderboard) > 0 else None,
+        "best_score": best_score,
+    }
+
+    metadata_path = f"{VOLUME_PATH}/{model_name}_metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f)
+
+    # Commit volume to persist model and metadata
     model_volume.commit()
 
     return {
@@ -172,7 +186,8 @@ def train_model(
         "num_samples": len(df),
         "presets_used": presets,
         "best_model": str(leaderboard.iloc[0]["model"]) if len(leaderboard) > 0 else None,
-        "best_score": float(leaderboard.iloc[0]["score_val"]) if len(leaderboard) > 0 else None,
+        "best_score": best_score,
+        "trained_at": trained_at,
     }
 
 
@@ -235,11 +250,21 @@ def get_model_status(model_name: str = "place_predictor") -> dict:
 
     predictor_file = model_path / "predictor.pkl"
 
+    # Load training metadata if exists
+    metadata_path = Path(f"{VOLUME_PATH}/{model_name}_metadata.json")
+    metadata = {}
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
     return {
         "exists": True,
         "model_name": model_name,
         "files": os.listdir(model_path),
         "predictor_exists": predictor_file.exists(),
+        "trained_at": metadata.get("trained_at"),
+        "best_score": metadata.get("best_score"),
+        "num_samples": metadata.get("num_samples"),
     }
 
 

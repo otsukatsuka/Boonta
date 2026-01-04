@@ -24,6 +24,8 @@ async def get_model_status(
     db: AsyncSession = Depends(get_db),
 ):
     """Get current model status from Modal."""
+    from datetime import datetime
+
     from modal_app.client import get_modal_client
 
     # Get training data count from local CSV
@@ -34,21 +36,34 @@ async def get_model_status(
             training_data_count = sum(1 for _ in f) - 1  # Subtract header
 
     # Check Modal for model status
+    is_trained = False
+    last_trained_at = None
+    best_score = None
+
     try:
         modal_client = get_modal_client()
         result = await modal_client.get_model_status()
         is_trained = result.get("exists", False)
+
+        # Parse trained_at from Modal metadata
+        if result.get("trained_at"):
+            last_trained_at = datetime.fromisoformat(
+                result["trained_at"].replace("Z", "+00:00")
+            )
+
+        best_score = result.get("best_score")
     except Exception as e:
         print(f"Modal status check failed: {e}")
-        is_trained = False
 
-    # Pre-computed metrics (updated after training)
-    metrics = {"roc_auc": 0.801} if is_trained else None
+    # Use best_score from Modal if available, otherwise use default
+    metrics = None
+    if is_trained:
+        metrics = {"roc_auc": best_score if best_score else 0.801}
 
     return ModelStatusResponse(
         model_version=settings.model_version,
         is_trained=is_trained,
-        last_trained_at=None,  # Could store in Modal Volume metadata
+        last_trained_at=last_trained_at,
         training_data_count=training_data_count,
         metrics=metrics,
     )
