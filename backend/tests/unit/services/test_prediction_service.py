@@ -472,8 +472,8 @@ class TestDarkHorseDetection:
             escape_count=2, front_count=2,
         )
 
-        # Generate rankings
-        rankings, _ = service._generate_rankings_with_pace(test_entries, analyses, pace, test_race)
+        # Generate rankings (now async for Modal integration)
+        rankings, _ = await service._generate_rankings_with_pace(test_entries, analyses, pace, test_race)
 
         # Check dark horse detection
         for r in rankings:
