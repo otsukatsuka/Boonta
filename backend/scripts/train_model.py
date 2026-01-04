@@ -78,18 +78,25 @@ def load_and_preprocess_data_from_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def train_model(df: pd.DataFrame, model_dir: str, target: str = "is_place"):
-    """Train AutoGluon model."""
-    # Select features for training
+    """Train AutoGluon model.
+
+    IMPORTANT: This model is trained WITHOUT odds/popularity features.
+    This prevents the model from simply learning "low odds = high probability".
+    Instead, the model learns from actual performance metrics.
+    """
+    # ==========================================
+    # 基本特徴量 - オッズ/人気を削除！
+    # ==========================================
     features = [
         "horse_number",
-        "odds",
-        "popularity",
+        # "odds",        # 削除！
+        # "popularity",  # 削除！
         "running_style_code",
         "distance",
         "is_turf",
         "grade_code",
         "weight",
-        "log_odds",
+        # "log_odds",    # 削除！
     ]
 
     # Add optional features if available
@@ -101,7 +108,9 @@ def train_model(df: pd.DataFrame, model_dir: str, target: str = "is_place"):
         df["last_3f"] = df["last_3f"].fillna(df["last_3f"].median())
         features.append("last_3f")
 
-    # Add horse history features if available (from --with-history collection)
+    # ==========================================
+    # 実績特徴量を重視（履歴データがある場合）
+    # ==========================================
     history_features = [
         "total_races",
         "total_wins",
@@ -244,7 +253,7 @@ def main():
     print(f"Training model for place prediction (top 3) using {grade_str} data{hist_str}")
     print("=" * 50)
 
-    predictor = train_model(df, model_dir, target="is_place")
+    train_model(df, model_dir, target="is_place")
 
     print(f"\nModel saved to: {model_dir}")
     print("\nYou can now use this model in the prediction service!")
