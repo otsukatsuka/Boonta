@@ -19,41 +19,15 @@ from app.models import Horse, Jockey, Race, RaceEntry, RunningStyle
 from tests.fixtures.factories import create_entry, create_horse, create_jockey, create_race
 
 
-# Store engine globally but recreate per test session
-_test_engine = None
-_test_session_factory = None
-
-
-def get_test_engine():
-    """Get or create test engine."""
-    global _test_engine
-    if _test_engine is None:
-        _test_engine = create_async_engine(
-            "sqlite+aiosqlite:///:memory:",
-            echo=False,
-            future=True,
-        )
-    return _test_engine
-
-
-def get_test_session_factory():
-    """Get or create test session factory."""
-    global _test_session_factory
-    if _test_session_factory is None:
-        _test_session_factory = async_sessionmaker(
-            bind=get_test_engine(),
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autocommit=False,
-            autoflush=False,
-        )
-    return _test_session_factory
-
-
 @pytest.fixture(scope="function")
 async def db_engine():
     """Create in-memory SQLite engine for tests."""
-    engine = get_test_engine()
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        echo=False,
+        future=True,
+    )
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -62,18 +36,27 @@ async def db_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+    # Properly dispose engine to close all connections
+    await engine.dispose()
+
 
 @pytest.fixture(scope="function")
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create async session for tests."""
-    session_factory = get_test_session_factory()
+    session_factory = async_sessionmaker(
+        bind=db_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
     async with session_factory() as session:
         yield session
         await session.rollback()
 
 
 @pytest.fixture(scope="function")
-async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
+async def client(db_session, db_engine) -> AsyncGenerator[AsyncClient, None]:
     """Create async HTTP client for API tests."""
     # Create a dependency override that uses the test session
     async def get_test_db():
