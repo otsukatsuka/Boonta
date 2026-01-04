@@ -39,7 +39,7 @@ jobs:
           cd backend
           python -m pip install --upgrade pip
           pip install fastapi uvicorn sqlalchemy aiosqlite pydantic pydantic-settings
-          pip install httpx beautifulsoup4 lxml pandas numpy selenium
+          pip install httpx beautifulsoup4 lxml pandas numpy selenium webdriver-manager
           pip install pytest pytest-asyncio pytest-cov
           pip install modal
 
