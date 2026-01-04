@@ -10,7 +10,7 @@
 - **展開予想重視**: 逃げ馬・先行馬の数からペースを予測し、有利な脚質を分析
 - **競馬場特性考慮**: 10場の特性（直線距離、坂の有無、小回り/大箱）を予測に反映
 - **馬場状態別予想**: 良/稍重/重/不良の4パターンで予想を比較可能
-- **MLモデル統合**: AutoGluonによる複勝予測モデル（ROC AUC: 0.845）
+- **MLモデル統合**: AutoGluon 1.5.0による複勝予測モデル（Modal.com上で実行）
 - **馬の過去成績分析**: 勝率・複勝率・直近5走平均着順などを特徴量として活用
 - **G1/G3対応**: 重賞レースの学習データを自動収集
 - **netkeiba連携**: 出馬表・オッズ・過去成績を自動取得
@@ -18,11 +18,15 @@
 ## 技術スタック
 
 ### Backend
-- Python 3.10+
+- Python 3.10+（ローカル）
 - FastAPI
 - SQLAlchemy (async)
-- AutoGluon (ML)
+- Modal.com（ML実行環境）
 - BeautifulSoup (スクレイピング)
+
+### ML環境（Modal.com）
+- Python 3.12
+- AutoGluon 1.5.0（LightGBM, CatBoost, XGBoost, PyTorch含む）
 
 ### Frontend
 - React 18
@@ -36,6 +40,7 @@
 ### 必要条件
 - Python 3.10以上
 - Node.js 18以上
+- Modal CLIアカウント
 
 ### バックエンド
 
@@ -51,6 +56,20 @@ pip install -r requirements.txt
 
 # 起動
 uvicorn app.main:app --reload
+```
+
+### Modal セットアップ
+
+```bash
+# Modal CLIインストール（requirements.txtに含まれている）
+pip install modal
+
+# Modal認証
+modal token new
+
+# Modal アプリデプロイ
+cd backend
+modal deploy modal_app/functions.py
 ```
 
 ### フロントエンド
@@ -110,7 +129,23 @@ curl -X POST http://localhost:8000/api/predictions/1
 
 ## MLモデル学習
 
-### データ収集
+### アーキテクチャ
+
+MLモデルの訓練と予測は [Modal.com](https://modal.com/) 上で実行されます：
+
+```
+┌─────────────────┐      ┌─────────────────────────────┐
+│  FastAPI        │      │  Modal.com                  │
+│  (ローカル)     │◄────►│  Python 3.12 + AutoGluon    │
+│                 │      │  GPU/CPU リソース           │
+└─────────────────┘      │                             │
+                         │  Modal Volume               │
+                         │  └── boonta-models/         │
+                         │      └── place_predictor/   │
+                         └─────────────────────────────┘
+```
+
+### 学習データ収集
 
 ```bash
 cd backend
@@ -129,6 +164,73 @@ python scripts/collect_training_data.py --grade all
 python scripts/collect_training_data.py --grade G1 --with-history
 ```
 
+収集されたデータは `backend/data/training/g1_races.csv` に保存されます。
+
+### 学習データの追加
+
+既存の学習データに新しいレースを追加する場合：
+
+```bash
+# 新しいG1レースを追加収集
+python scripts/collect_training_data.py --grade G1 --with-history
+
+# CSVファイルが更新される
+# backend/data/training/g1_races.csv
+```
+
+手動でCSVを編集することも可能です。必要なカラム：
+- 基本情報: `horse_number`, `post_position`, `odds`, `popularity`, `weight`
+- 馬情報: `horse_age`, `horse_sex`, `horse_weight`, `horse_weight_diff`
+- レース情報: `distance`, `course_type`, `venue`, `track_condition`, `weather`
+- 脚質: `running_style`
+- 成績: `win_rate`, `place_rate`, `avg_position_last5`, `avg_last_3f`, `best_last_3f`
+- 騎手: `jockey_win_rate`, `jockey_venue_win_rate`
+- ターゲット: `is_place`（複勝入着=1、着外=0）
+
+### モデル訓練
+
+#### 方法1: Modal CLIで直接実行（推奨）
+
+訓練の進行状況がリアルタイムで確認できます：
+
+```bash
+cd backend
+
+# テスト訓練（5分、medium_quality）
+modal run modal_app/functions.py::test_train
+
+# 本番訓練（30分、extreme プリセット）
+# ※ functions.py の test_train を編集するか、APIを使用
+```
+
+#### 方法2: FastAPI経由
+
+```bash
+# バックエンドを起動
+uvicorn app.main:app --reload
+
+# 別ターミナルで訓練開始
+curl -X POST http://localhost:8000/api/model/train
+
+# 訓練状況確認（call_idは上記レスポンスから取得）
+curl http://localhost:8000/api/model/training-status/{call_id}
+
+# モデル状態確認
+curl http://localhost:8000/api/model/status
+```
+
+### 訓練プリセット
+
+AutoGluon 1.5.0 のプリセット：
+
+| プリセット | 用途 | 時間目安 |
+|-----------|------|---------|
+| `medium_quality` | テスト・開発用 | 5-10分 |
+| `best_quality` | 本番用（大データセット向け） | 30分〜 |
+| `extreme` | 本番用（小データセット向け、自動選択） | 30分〜 |
+
+**注意**: サンプル数が30,000件未満の場合、`best_quality` は自動的に `extreme` に変更されます。
+
 ### G3レースID取得
 
 ```bash
@@ -136,17 +238,12 @@ python scripts/collect_training_data.py --grade G1 --with-history
 python scripts/fetch_grade_race_ids.py
 ```
 
-### モデル学習
+### 既存モデルのModal Volumeへのアップロード
+
+ローカルで訓練済みのモデルがある場合：
 
 ```bash
-# 通常学習
-python scripts/train_model.py
-
-# 過去成績特徴量付きで学習（推奨）
-python scripts/train_model.py --with-history
-
-# グレード指定
-python scripts/train_model.py --grade G1 --with-history
+modal run scripts/upload_model_to_modal.py
 ```
 
 ### 学習データの特徴量
@@ -159,13 +256,21 @@ python scripts/train_model.py --grade G1 --with-history
 | 過去成績 | 勝率, 複勝率, 直近5走平均着順, 重賞勝利数 |
 | 上がり | 過去最高上がり3F, 平均上がり3F |
 
-学習データは `backend/data/training/`、モデルは `backend/models/place_predictor/` に保存されます。
-
 ## API仕様
 
 起動後、以下でAPIドキュメントを確認できます：
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+### 主要エンドポイント
+
+| エンドポイント | メソッド | 説明 |
+|---------------|---------|------|
+| `/api/model/status` | GET | モデル状態確認 |
+| `/api/model/train` | POST | モデル訓練開始 |
+| `/api/model/training-status/{call_id}` | GET | 訓練進行状況 |
+| `/api/model/feature-importance` | GET | 特徴量重要度 |
+| `/api/predictions/{race_id}` | POST | 予測実行 |
 
 ## 予測ロジック
 
@@ -227,3 +332,4 @@ MIT
 
 - netkeibaへのスクレイピングは利用規約を遵守し、適切な間隔を空けて行ってください
 - 本ソフトウェアは予想の参考情報を提供するものであり、馬券購入の結果について一切の責任を負いません
+- Modal.comの無料枠（$30/月）で通常の使用は十分カバーできます
