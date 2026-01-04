@@ -1,10 +1,8 @@
-"""Prediction service with pace-focused analysis and ML model integration."""
+"""Prediction service with pace-focused analysis and ML model integration via Modal."""
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -18,33 +16,6 @@ from app.schemas import (
 )
 
 settings = get_settings()
-
-# MLモデルのロード（遅延ロード）
-_ml_predictor = None
-
-
-def get_ml_predictor():
-    """Load ML predictor lazily."""
-    global _ml_predictor
-    if _ml_predictor is None:
-        # backend/app/services -> backend/app -> backend -> backend/models/place_predictor
-        model_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "models",
-            "place_predictor"
-        )
-        if os.path.exists(model_path):
-            try:
-                from autogluon.tabular import TabularPredictor
-                _ml_predictor = TabularPredictor.load(model_path)
-                print(f"Loaded ML model from {model_path}")
-            except Exception as e:
-                print(f"Failed to load ML model: {e}")
-                _ml_predictor = False  # Mark as failed
-        else:
-            print(f"ML model not found at {model_path}")
-            _ml_predictor = False  # Model not available
-    return _ml_predictor if _ml_predictor else None
 
 
 @dataclass
@@ -118,8 +89,8 @@ class PredictionService:
         # ペース予想（競馬場・馬場状態を考慮）
         pace_prediction = self._predict_pace(entries, analyses, race)
 
-        # 展開を考慮したランキング生成（MLモデル使用フラグも返す）
-        rankings, use_ml = self._generate_rankings_with_pace(entries, analyses, pace_prediction, race)
+        # 展開を考慮したランキング生成（Modal経由でML予測、MLモデル使用フラグも返す）
+        rankings, use_ml = await self._generate_rankings_with_pace(entries, analyses, pace_prediction, race)
 
         # 買い目生成
         recommended_bets = self._generate_bets(rankings, pace_prediction, analyses, race)
@@ -284,20 +255,18 @@ class PredictionService:
             front_count=pace_result.front_count,
         )
 
-    def _get_ml_predictions(
+    async def _get_ml_predictions(
         self,
         entries: list[RaceEntry],
         analyses: dict[int, HorseAnalysis],
         race,
     ) -> dict[int, float]:
-        """Get ML model predictions for place probability.
+        """Get ML model predictions for place probability via Modal.
 
         IMPORTANT: This method now provides features WITHOUT odds/popularity.
         The ML model should be trained without these features as well.
         """
-        predictor = get_ml_predictor()
-        if not predictor:
-            return {}
+        from modal_app.client import get_modal_client
 
         # Prepare data for prediction
         data = []
@@ -321,22 +290,15 @@ class PredictionService:
             grade_map = {"G1": 1, "G2": 2, "G3": 3, "OP": 4}
             grade_code = grade_map.get(race.grade, 4)
 
-            # ==========================================
-            # オッズ関連特徴量を削除！
-            # ==========================================
             row = {
                 "horse_number": analysis.horse_number,
-                # "odds": 削除,
-                # "popularity": 削除,
                 "running_style_code": running_style_code,
                 "distance": race.distance,
                 "is_turf": is_turf,
                 "grade_code": grade_code,
                 "weight": entry.weight or 55.0,
-                # "log_odds": 削除,
                 "horse_weight": entry.horse_weight or 480,
                 "last_3f": analysis.best_last_3f,
-                # 実績データ (デフォルト値または実際の値)
                 "win_rate": analysis.win_rate,
                 "place_rate": analysis.place_rate,
                 "avg_position_last5": analysis.avg_position_last5,
@@ -348,22 +310,22 @@ class PredictionService:
         if not data:
             return {}
 
-        # Make prediction
-        df = pd.DataFrame(data)
+        # Call Modal for prediction
         try:
-            proba = predictor.predict_proba(df)
-            # Get probability for class 1 (is_place = 1)
-            if hasattr(proba, 'iloc'):
-                place_proba = proba[1].values if 1 in proba.columns else proba.iloc[:, 1].values
-            else:
-                place_proba = proba[:, 1]
+            modal_client = get_modal_client()
+            result = await modal_client.predict(data)
 
-            return dict(zip(horse_ids, place_proba))
+            if not result.get("success"):
+                print(f"Modal prediction error: {result.get('error')}")
+                return {}
+
+            predictions = result.get("predictions", [])
+            return dict(zip(horse_ids, predictions))
         except Exception as e:
-            print(f"ML prediction error: {e}")
+            print(f"Modal prediction error: {e}")
             return {}
 
-    def _generate_rankings_with_pace(
+    async def _generate_rankings_with_pace(
         self,
         entries: list[RaceEntry],
         analyses: dict[int, HorseAnalysis],
@@ -374,7 +336,7 @@ class PredictionService:
 
         IMPORTANT: This method NO LONGER uses odds for scoring.
         Differentiation comes from:
-        1. ML predictions (trained without odds features)
+        1. ML predictions (trained without odds features via Modal)
         2. Pace/running style fit
         3. Track record (when available)
 
@@ -383,8 +345,8 @@ class PredictionService:
         """
         rankings = []
 
-        # Get ML predictions
-        ml_predictions = self._get_ml_predictions(entries, analyses, race)
+        # Get ML predictions via Modal
+        ml_predictions = await self._get_ml_predictions(entries, analyses, race)
         use_ml = len(ml_predictions) > 0
 
         for entry in entries:

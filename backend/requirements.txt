@@ -15,8 +15,10 @@ lxml>=4.9.0
 selenium>=4.0.0
 webdriver-manager>=4.0.0
 
-# ML
-autogluon.tabular>=1.0.0
+# Modal (replaces local AutoGluon)
+modal>=0.66.0
+
+# Data processing (for local feature engineering)
 pandas>=2.0.0
 numpy>=1.24.0
 

@@ -216,3 +216,10 @@ backend/models/place_predictor/
 # SQLite database
 backend/data/*.db
 backend/data/*.db-journal
+
+# Modal
+.modal/
+
+# macOS
+.DS_Store
+**/.DS_Store
