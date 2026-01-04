@@ -32,7 +32,6 @@ from app.schemas.jockey import (
 from app.schemas.prediction import (
     BetRecommendation,
     FeatureImportanceResponse,
-    HighRiskBet,
     HorsePrediction,
     ModelStatusResponse,
     PacePrediction,
@@ -100,7 +99,6 @@ __all__ = [
     "HorsePrediction",
     "PacePrediction",
     "BetRecommendation",
-    "HighRiskBet",
     "ModelStatusResponse",
     "FeatureImportanceResponse",
 ]

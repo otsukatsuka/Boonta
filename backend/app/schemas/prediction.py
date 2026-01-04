@@ -35,27 +35,13 @@ class PacePrediction(BaseSchema):
     front_count: int = Field(0, ge=0, description="先行馬数")
 
 
-class HighRiskBet(BaseSchema):
-    """High-risk high-return bet."""
-
-    bet_type: str = Field(..., description="馬券種別")
-    horses: list[int] = Field(..., description="馬番リスト")
-    expected_return: float = Field(..., description="期待リターン倍率")
-    risk_level: str = Field(..., description="リスクレベル (medium/high/very_high)")
-    reason: str = Field(..., description="選定理由")
-    amount: int = Field(100, description="推奨金額")
-
-
 class BetRecommendation(BaseSchema):
-    """Bet recommendation."""
+    """Bet recommendation - 三連複と三連単2頭軸マルチのみ."""
 
-    trifecta: dict[str, Any] | None = Field(None, description="三連単")
-    trio: dict[str, Any] | None = Field(None, description="三連複")
-    exacta: dict[str, Any] | None = Field(None, description="馬単")
-    wide: dict[str, Any] | None = Field(None, description="ワイド")
+    trio: dict[str, Any] | None = Field(None, description="三連複（軸2頭流し）")
+    trifecta_multi: dict[str, Any] | None = Field(None, description="三連単2頭軸マルチ")
     total_investment: int = Field(0, ge=0, description="合計投資額")
     note: str | None = Field(None, description="備考")
-    high_risk_bets: list[HighRiskBet] | None = Field(None, description="ハイリスクハイリターン買い目")
 
 
 class PredictionCreate(BaseSchema):

@@ -496,36 +496,10 @@ class TestDarkHorseDetection:
 
 
 class TestBetGeneration:
-    """Tests for _generate_bets method."""
+    """Tests for _generate_bets method - 三連複と三連単2頭軸マルチのみ."""
 
-    def test_trifecta_formation(self, db_session):
-        """Trifecta uses top 2 as axis, counter horses 2-6."""
-        service = PredictionService(db_session)
-
-        rankings = [
-            HorsePrediction(
-                rank=i+1, horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                score=0.3 - i*0.02, win_probability=0.2, place_probability=0.4,
-                popularity=i+1, odds=float(3+i*2), is_dark_horse=False,
-            )
-            for i in range(10)
-        ]
-        pace = PacePrediction(
-            type="middle", confidence=0.6, reason="test",
-            advantageous_styles=["FRONT", "STALKER"],
-            escape_count=1, front_count=3,
-        )
-        analyses = {}
-
-        bets = service._generate_bets(rankings, pace, analyses, None)
-
-        assert bets.trifecta is not None
-        assert bets.trifecta["type"] == "formation"
-        assert 1 in bets.trifecta["first"]  # Top horse as axis
-        assert 2 in bets.trifecta["first"]  # Second horse as axis
-
-    def test_trio_box_combinations(self, db_session):
-        """Trio box with 5 horses = 10 combinations."""
+    def test_trio_pivot_2_nagashi(self, db_session):
+        """三連複は軸2頭流し形式."""
         service = PredictionService(db_session)
 
         rankings = [
@@ -546,48 +520,19 @@ class TestBetGeneration:
         bets = service._generate_bets(rankings, pace, analyses, None)
 
         assert bets.trio is not None
-        assert bets.trio["type"] == "box"
-        assert bets.trio["combinations"] == 10
+        assert bets.trio["type"] == "pivot_2_nagashi"
+        assert len(bets.trio["pivots"]) == 2
+        assert 1 in bets.trio["pivots"]  # 本命（スコア1位）
 
-    def test_exacta_generation_high_confidence(self, db_session):
-        """Exacta only when top horse score > 0.25."""
+    def test_trifecta_multi_pivot_2(self, db_session):
+        """三連単2頭軸マルチ形式."""
         service = PredictionService(db_session)
 
-        # High score top horse
-        rankings_high = [
-            HorsePrediction(
-                rank=1, horse_id=1, horse_name="本命馬", horse_number=1,
-                score=0.35, win_probability=0.25, place_probability=0.5,
-                popularity=1, odds=3.0, is_dark_horse=False,
-            ),
-        ] + [
-            HorsePrediction(
-                rank=i+2, horse_id=i+2, horse_name=f"馬{i+2}", horse_number=i+2,
-                score=0.2 - i*0.02, win_probability=0.1, place_probability=0.3,
-                popularity=i+2, odds=float(5+i*3), is_dark_horse=False,
-            )
-            for i in range(9)
-        ]
-        pace = PacePrediction(
-            type="middle", confidence=0.6, reason="test",
-            advantageous_styles=["FRONT", "STALKER"],
-            escape_count=1, front_count=3,
-        )
-
-        bets = service._generate_bets(rankings_high, pace, {}, None)
-        assert bets.exacta is not None
-        assert bets.exacta["first"] == 1
-
-    def test_exacta_not_generated_low_confidence(self, db_session):
-        """Exacta not generated when top horse score <= 0.25."""
-        service = PredictionService(db_session)
-
-        # Low score top horse
-        rankings_low = [
+        rankings = [
             HorsePrediction(
                 rank=i+1, horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                score=0.2 - i*0.01, win_probability=0.1, place_probability=0.3,
-                popularity=i+1, odds=float(5+i*3), is_dark_horse=False,
+                score=0.3 - i*0.02, win_probability=0.2, place_probability=0.4,
+                popularity=i+1, odds=float(3+i*2), is_dark_horse=False,
             )
             for i in range(10)
         ]
@@ -596,9 +541,15 @@ class TestBetGeneration:
             advantageous_styles=["FRONT", "STALKER"],
             escape_count=1, front_count=3,
         )
+        analyses = {}
 
-        bets = service._generate_bets(rankings_low, pace, {}, None)
-        assert bets.exacta is None
+        bets = service._generate_bets(rankings, pace, analyses, None)
+
+        assert bets.trifecta_multi is not None
+        assert bets.trifecta_multi["type"] == "pivot_2_multi"
+        assert len(bets.trifecta_multi["pivots"]) == 2
+        # マルチ = 相手数 × 6パターン
+        assert bets.trifecta_multi["combinations"] == len(bets.trifecta_multi["others"]) * 6
 
     def test_total_investment_calculation(self, db_session):
         """Total investment should be calculated correctly."""
@@ -621,123 +572,126 @@ class TestBetGeneration:
 
         bets = service._generate_bets(rankings, pace, {}, None)
 
-        # Verify total is sum of all bets
+        # 三連複 + 三連単マルチ
         expected_total = (
-            bets.trifecta["combinations"] * bets.trifecta["amount_per_ticket"]
-            + bets.trio["combinations"] * bets.trio["amount_per_ticket"]
+            bets.trio["combinations"] * bets.trio["amount_per_ticket"]
+            + bets.trifecta_multi["combinations"] * bets.trifecta_multi["amount_per_ticket"]
         )
-        if bets.exacta:
-            expected_total += bets.exacta["combinations"] * bets.exacta["amount_per_ticket"]
-        if bets.wide:
-            expected_total += len(bets.wide["pairs"]) * bets.wide["amount_per_ticket"]
 
         assert bets.total_investment == expected_total
 
-
-class TestHighRiskBetGeneration:
-    """Tests for _generate_high_risk_bets method."""
-
-    def test_high_risk_single_bet(self, db_session):
-        """Single bet on highest expected return dark horse."""
+    def test_dark_horse_as_pivot(self, db_session):
+        """穴馬条件を満たす馬がいればpivotに含まれる."""
         service = PredictionService(db_session)
 
+        # 人気8位でオッズ30倍、スコア0.20の穴馬を作成
+        rankings = [
+            HorsePrediction(
+                rank=1, horse_id=1, horse_name="本命馬", horse_number=1,
+                score=0.35, win_probability=0.25, place_probability=0.5,
+                popularity=1, odds=3.0, is_dark_horse=False,
+            ),
+        ] + [
+            HorsePrediction(
+                rank=i+2, horse_id=i+2, horse_name=f"馬{i+2}", horse_number=i+2,
+                score=0.2 - i*0.01, win_probability=0.1, place_probability=0.3,
+                popularity=i+2, odds=float(5+i*3), is_dark_horse=False,
+            )
+            for i in range(6)
+        ] + [
+            HorsePrediction(
+                rank=8, horse_id=8, horse_name="穴馬", horse_number=8,
+                score=0.20, win_probability=0.08, place_probability=0.25,
+                popularity=8, odds=30.0, is_dark_horse=True,
+            ),
+        ]
+        pace = PacePrediction(
+            type="high", confidence=0.8, reason="test",
+            advantageous_styles=["STALKER", "CLOSER"],
+            escape_count=2, front_count=2,
+        )
+        analyses = {
+            8: HorseAnalysis(
+                horse_id=8, horse_name="穴馬", horse_number=8,
+                running_style="STALKER",
+                avg_first_corner=7.0, avg_last_3f=34.0, best_last_3f=33.5,
+                win_rate=0.1, place_rate=0.3, grade_race_wins=0,
+                odds=30.0, popularity=8,
+            )
+        }
+
+        bets = service._generate_bets(rankings, pace, analyses, None)
+
+        # 穴馬8番がpivotに含まれる
+        assert 8 in bets.trio["pivots"]
+        assert 8 in bets.trifecta_multi["pivots"]
+
+
+class TestSelectBestDarkHorse:
+    """Tests for _select_best_dark_horse method."""
+
+    def test_select_dark_horse_with_criteria(self, db_session):
+        """人気8位以下、オッズ20倍以上、スコア0.18以上の穴馬を選定."""
+        service = PredictionService(db_session)
+
+        rankings = [
+            HorsePrediction(
+                rank=1, horse_id=1, horse_name="本命馬", horse_number=1,
+                score=0.35, win_probability=0.25, place_probability=0.5,
+                popularity=1, odds=3.0, is_dark_horse=False,
+            ),
+            HorsePrediction(
+                rank=2, horse_id=2, horse_name="対抗馬", horse_number=2,
+                score=0.28, win_probability=0.2, place_probability=0.45,
+                popularity=2, odds=5.0, is_dark_horse=False,
+            ),
+            HorsePrediction(
+                rank=8, horse_id=8, horse_name="穴馬", horse_number=8,
+                score=0.20, win_probability=0.08, place_probability=0.25,
+                popularity=8, odds=25.0, is_dark_horse=True,
+            ),
+        ]
+        pace = PacePrediction(
+            type="high", confidence=0.8, reason="test",
+            advantageous_styles=["STALKER", "CLOSER"],
+            escape_count=2, front_count=2,
+        )
+        analyses = {
+            8: HorseAnalysis(
+                horse_id=8, horse_name="穴馬", horse_number=8,
+                running_style="STALKER",
+                avg_first_corner=7.0, avg_last_3f=34.0, best_last_3f=33.5,
+                win_rate=0.1, place_rate=0.3, grade_race_wins=0,
+                odds=25.0, popularity=8,
+            )
+        }
+
+        dark_horse = service._select_best_dark_horse(rankings, analyses, pace)
+        assert dark_horse.horse_number == 8
+
+    def test_fallback_to_second_if_no_dark_horse(self, db_session):
+        """穴馬条件を満たす馬がいない場合はスコア2位を返す."""
+        service = PredictionService(db_session)
+
+        # 全員人気上位
         rankings = [
             HorsePrediction(
                 rank=i+1, horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
                 score=0.3 - i*0.02, win_probability=0.2, place_probability=0.4,
-                popularity=i+1, odds=float(3+i*5), is_dark_horse=(i >= 5),
+                popularity=i+1, odds=float(3+i*2), is_dark_horse=False,
             )
-            for i in range(10)
+            for i in range(5)
         ]
         pace = PacePrediction(
-            type="high", confidence=0.8, reason="test",
-            advantageous_styles=["STALKER", "CLOSER"],
-            escape_count=3, front_count=2,
+            type="middle", confidence=0.6, reason="test",
+            advantageous_styles=["FRONT", "STALKER"],
+            escape_count=1, front_count=3,
         )
-        analyses = {
-            i+1: HorseAnalysis(
-                horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                running_style="STALKER" if i >= 5 else "FRONT",
-                avg_first_corner=7.0, avg_last_3f=34.0, best_last_3f=33.5,
-                win_rate=0.1, place_rate=0.3, grade_race_wins=0,
-                odds=float(3+i*5), popularity=i+1,
-            )
-            for i in range(10)
-        }
+        analyses = {}
 
-        high_risk = service._generate_high_risk_bets(rankings, pace, analyses)
-
-        # Should have at least one single bet
-        single_bets = [b for b in high_risk if b.bet_type == "単勝"]
-        assert len(single_bets) >= 1
-
-    def test_high_risk_wide_bet(self, db_session):
-        """Wide bet pairing dark horse with favorite."""
-        service = PredictionService(db_session)
-
-        rankings = [
-            HorsePrediction(
-                rank=i+1, horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                score=0.3 - i*0.02, win_probability=0.2, place_probability=0.4,
-                popularity=i+1, odds=float(3+i*5), is_dark_horse=(i >= 5),
-            )
-            for i in range(10)
-        ]
-        pace = PacePrediction(
-            type="high", confidence=0.8, reason="test",
-            advantageous_styles=["STALKER", "CLOSER"],
-            escape_count=3, front_count=2,
-        )
-        analyses = {
-            i+1: HorseAnalysis(
-                horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                running_style="STALKER" if i >= 5 else "FRONT",
-                avg_first_corner=7.0, avg_last_3f=34.0, best_last_3f=33.5,
-                win_rate=0.1, place_rate=0.3, grade_race_wins=0,
-                odds=float(3+i*5), popularity=i+1,
-            )
-            for i in range(10)
-        }
-
-        high_risk = service._generate_high_risk_bets(rankings, pace, analyses)
-
-        # Should have wide bet
-        wide_bets = [b for b in high_risk if b.bet_type == "ワイド"]
-        assert len(wide_bets) >= 1
-
-    def test_sorted_by_expected_return(self, db_session):
-        """High risk bets should be sorted by expected return."""
-        service = PredictionService(db_session)
-
-        rankings = [
-            HorsePrediction(
-                rank=i+1, horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                score=0.25 - i*0.01, win_probability=0.2, place_probability=0.4,
-                popularity=i+1, odds=float(3+i*10), is_dark_horse=(i >= 5),
-            )
-            for i in range(10)
-        ]
-        pace = PacePrediction(
-            type="high", confidence=0.8, reason="test",
-            advantageous_styles=["STALKER", "CLOSER"],
-            escape_count=3, front_count=2,
-        )
-        analyses = {
-            i+1: HorseAnalysis(
-                horse_id=i+1, horse_name=f"馬{i+1}", horse_number=i+1,
-                running_style="STALKER" if i >= 5 else "FRONT",
-                avg_first_corner=7.0, avg_last_3f=34.0, best_last_3f=33.5,
-                win_rate=0.1, place_rate=0.3, grade_race_wins=0,
-                odds=float(3+i*10), popularity=i+1,
-            )
-            for i in range(10)
-        }
-
-        high_risk = service._generate_high_risk_bets(rankings, pace, analyses)
-
-        # Verify sorted by expected return (descending)
-        for i in range(len(high_risk) - 1):
-            assert high_risk[i].expected_return >= high_risk[i+1].expected_return
+        dark_horse = service._select_best_dark_horse(rankings, analyses, pace)
+        # スコア2位（rank=2）を返す
+        assert dark_horse.horse_number == 2
 
 
 class TestConfidenceCalculation:
