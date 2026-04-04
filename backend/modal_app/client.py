@@ -50,6 +50,7 @@ class ModalClient:
         model_name: str = "place_predictor",
         time_limit: int = 1800,
         presets: str = "best_quality",
+        excluded_model_types: list[str] | None = None,
     ) -> dict:
         """Call Modal train function (async spawn).
 
@@ -58,6 +59,7 @@ class ModalClient:
             model_name: Name for the model
             time_limit: Training time limit in seconds
             presets: AutoGluon presets
+            excluded_model_types: Model types to exclude (e.g. ["FASTTEXT"] to skip Mitra on CPU)
 
         Returns:
             dict with call_id for status tracking
@@ -71,6 +73,7 @@ class ModalClient:
                 model_name=model_name,
                 time_limit=time_limit,
                 presets=presets,
+                excluded_model_types=excluded_model_types,
             )
 
             return {"success": True, "call_id": call.object_id}

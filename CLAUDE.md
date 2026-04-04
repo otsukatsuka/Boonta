@@ -42,7 +42,7 @@ cd backend
 # Authentication (first time only)
 modal token new
 
-# Deploy Modal app
+# Deploy Modal app (MUST do before training if code changed)
 modal deploy modal_app/functions.py
 
 # Test locally before deploying
@@ -51,7 +51,12 @@ modal run modal_app/functions.py::test_train     # Run test training
 
 # Upload existing local model to Modal Volume
 modal run scripts/upload_model_to_modal.py
+
+# Monitor via dashboard
+modal dashboard                                  # Opens browser with real-time logs
 ```
+
+**Important**: Always use `best_quality` preset for CPU training. Do NOT use `extreme` preset — it requires GPU and dependencies (TabPFN, TabDPT, TabICL, Mitra) not installed in the Modal image.
 
 ### Docker
 
@@ -95,7 +100,7 @@ ML training and prediction runs on Modal.com, not locally:
 Layered architecture with clear separation of concerns:
 
 - **api/** - FastAPI route handlers (races, horses, entries, predictions, fetch, model, jockeys)
-- **services/** - Business logic layer (race_service, prediction_service, feature_service)
+- **services/** - Business logic layer (race_service, prediction_service, feature_service, simulation_service)
 - **repositories/** - Data access layer with base repository pattern
 - **models/** - SQLAlchemy ORM models (race, horse, jockey, entry, result, prediction)
 - **schemas/** - Pydantic validation schemas
@@ -106,19 +111,15 @@ Layered architecture with clear separation of concerns:
 
 Self-contained Modal functions (no external imports from app/):
 
-- **functions.py** - All Modal functions with inline feature engineering
-  - `train_model()` - Train AutoGluon model (timeout: 3600s, memory: 8GB)
-  - `predict()` - Make predictions (timeout: 60s, memory: 4GB)
-  - `get_model_status()` - Check model on Volume
-  - `get_feature_importance()` - Get feature importance
-  - `test_status()` - Local entrypoint for testing
-  - `test_train()` - Local entrypoint for test training
+- **functions.py** - All Modal functions (train, predict, status, feature importance)
+- **features.py** - Feature engineering logic (shared with Modal functions)
+- **image.py** - Modal container image definition (Python 3.12 + AutoGluon)
 - **client.py** - ModalClient class for calling Modal functions from FastAPI
 
 ### Frontend Structure (`frontend/src/`)
 
 - **pages/** - Route components (Dashboard, RaceList, RaceDetail, DataInput, ModelStatus)
-- **components/** - Reusable UI components organized by domain (common, race, prediction, charts)
+- **components/** - Reusable UI components organized by domain (common, race, prediction, charts, simulation)
 - **hooks/** - React Query hooks for API data fetching
 - **api/** - Axios client and API functions
 - **types/** - TypeScript interfaces
@@ -227,10 +228,27 @@ Services encapsulate business logic:
 ### Feature Engineering
 
 Feature engineering code exists in two places (must stay in sync):
-- `backend/app/ml/features.py` - For local utilities (not used for ML anymore)
-- `backend/modal_app/functions.py` - Inlined in Modal functions (used for training/prediction)
+- `backend/app/ml/features.py` - For local utilities
+- `backend/modal_app/features.py` - Used by Modal functions for training/prediction
 
 When updating features, update both locations.
+
+### Netkeiba Scraping
+
+- Running styles are fetched via AJAX (`/horse/ajax_horse_results.html`) not by loading the full horse page
+- The race results table class is `db_h_race_results`, corner positions ("通過") are at column index **25**
+- netkeiba may change HTML structure — if running styles all return VERSATILE, check column indices
+- Horse IDs are extracted from the shutuba page via Selenium, but past results use httpx + AJAX for speed
+
+### Linting Configuration
+
+- **ruff**: line-length 100, target Python 3.10
+- **mypy**: Python 3.10, strict return type warnings
+
+### Related Design Documents
+
+- `design.md` - Detailed system design specification
+- `FRONTEND_HANDOVER.md` - Frontend implementation guide with API specs and component patterns
 
 ## Training Data
 
@@ -254,15 +272,55 @@ Training data is stored at `backend/data/training/g1_races.csv`
 
 ```bash
 cd backend
+
+# 1. Fetch race IDs for new years from netkeiba
+python scripts/fetch_grade_race_ids.py --grade G1 --years 2025 2026 --output data/g1_race_ids_new.json
+
+# 2. Add fetched IDs to KNOWN_G1_RACE_IDS in scripts/collect_training_data.py
+
+# 3. Run collection (30-60 min, scraping netkeiba)
 python scripts/collect_training_data.py --grade G1 --with-history
+
+# 4. Copy hist file to main training file (--with-history outputs to g1_races_hist.csv)
+cat data/training/g1_races_hist.csv >| data/training/g1_races.csv
 ```
 
 ### Training Model
 
 ```bash
-# Via Modal CLI (recommended, shows real-time logs)
-modal run modal_app/functions.py::test_train
+# Via API (recommended for production, uses best_quality preset)
+curl -X POST http://localhost:8000/api/model/train \
+  -H "Content-Type: application/json" \
+  -d '{"time_limit": 1800}'
 
-# Via API
-curl -X POST http://localhost:8000/api/model/train
+# Check training progress
+curl http://localhost:8000/api/model/training-status/{call_id}
+
+# Via Modal CLI (test only, 5 min limit)
+modal run modal_app/functions.py::test_train
 ```
+
+### Race Prediction Workflow
+
+```bash
+# 1. Register race from netkeiba
+curl -X POST http://localhost:8000/api/fetch/register \
+  -H "Content-Type: application/json" \
+  -d '{"netkeiba_race_id": "YYYYVVKKDDNN", "fetch_odds": true}'
+
+# 2. Fetch running styles (uses AJAX endpoint, not Selenium page load)
+curl -X POST http://localhost:8000/api/fetch/running-styles/{db_race_id} \
+  -H "Content-Type: application/json" \
+  -d '{"netkeiba_race_id": "YYYYVVKKDDNN"}'
+
+# 3. Run prediction
+curl -X POST http://localhost:8000/api/predictions/{db_race_id}
+```
+
+## Claude Code Skills
+
+Custom slash commands for common workflows:
+
+- `/predict-race [netkeiba_race_id]` — Register race + fetch running styles + run prediction
+- `/collect-training-data [year_start] [year_end]` — Fetch new G1 race data from netkeiba
+- `/train-model` — Deploy Modal app and start model training

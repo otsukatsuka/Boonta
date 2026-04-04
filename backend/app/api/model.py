@@ -74,6 +74,9 @@ class TrainModelRequest(BaseModel):
 
     time_limit: int = Field(default=1800, description="Training time limit in seconds")
     presets: str = Field(default="best_quality", description="AutoGluon presets")
+    excluded_model_types: list[str] | None = Field(
+        default=None, description="Model types to exclude (e.g. ['FASTTEXT'] to skip Mitra on CPU)"
+    )
 
 
 class TrainModelResponse(BaseModel):
@@ -106,6 +109,7 @@ async def train_model(
     # Trigger training on Modal
     time_limit = request.time_limit if request else 1800
     presets = request.presets if request else "best_quality"
+    excluded_model_types = request.excluded_model_types if request else None
 
     try:
         modal_client = get_modal_client()
@@ -113,6 +117,7 @@ async def train_model(
             training_data_csv=training_data_csv,
             time_limit=time_limit,
             presets=presets,
+            excluded_model_types=excluded_model_types,
         )
 
         if not result.get("success"):
