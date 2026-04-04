@@ -179,11 +179,16 @@ class NetkeibaFetcher(DataFetcher):
                     if waku_cell:
                         post_position = int(waku_cell.get_text(strip=True))
 
-                    # Extract horse name
+                    # Extract horse name and netkeiba horse ID
                     horse_name_elem = row.select_one("span.HorseName a")
                     horse_name = ""
+                    netkeiba_horse_id = None
                     if horse_name_elem:
                         horse_name = horse_name_elem.get("title", "") or horse_name_elem.get_text(strip=True)
+                        href = horse_name_elem.get("href", "")
+                        horse_id_match = re.search(r"/horse/(\d+)", href)
+                        if horse_id_match:
+                            netkeiba_horse_id = horse_id_match.group(1)
 
                     if not horse_name:
                         continue
@@ -259,6 +264,7 @@ class NetkeibaFetcher(DataFetcher):
                         horse_weight=horse_weight,
                         horse_weight_diff=horse_weight_diff,
                         trainer=trainer,
+                        netkeiba_horse_id=netkeiba_horse_id,
                     )
                     entries.append(entry)
 
@@ -894,6 +900,110 @@ class NetkeibaFetcher(DataFetcher):
             return "STALKER"
         else:
             return "CLOSER"
+
+    async def fetch_horse_stats_via_ajax(self, netkeiba_horse_id: str) -> HorseHistoryStats:
+        """Fetch horse performance stats via AJAX (fast, no Selenium needed).
+
+        Uses the same AJAX endpoint as running style fetch.
+        Returns HorseHistoryStats with real performance data.
+        """
+        from datetime import datetime
+
+        default = HorseHistoryStats(horse_id=netkeiba_horse_id)
+
+        try:
+            await asyncio.sleep(0.5)
+            ajax_url = f"{self.DB_URL}/horse/ajax_horse_results.html"
+            response = await self.client.get(
+                ajax_url,
+                params={"input": "UTF-8", "output": "json", "id": netkeiba_horse_id},
+            )
+
+            if response.status_code != 200:
+                return default
+
+            data = response.json()
+            if data.get("status") != "OK":
+                return default
+
+            soup = BeautifulSoup(data["data"], "lxml")
+            rows = soup.select("table.db_h_race_results tbody tr")
+
+            if not rows:
+                return default
+
+            positions = []
+            last_3f_values = []
+            race_dates = []
+
+            for row in rows[:20]:  # Last 20 races max
+                try:
+                    cols = row.select("td")
+                    if len(cols) < 28:
+                        continue
+
+                    # Date [0]
+                    date_text = cols[0].get_text(strip=True)
+
+                    # Position [11]
+                    pos_text = cols[11].get_text(strip=True)
+                    if not pos_text.isdigit():
+                        continue
+                    position = int(pos_text)
+                    positions.append(position)
+                    race_dates.append(date_text)
+
+                    # Last 3F [27]
+                    last_3f_text = cols[27].get_text(strip=True)
+                    try:
+                        last_3f = float(last_3f_text)
+                        if last_3f > 0:
+                            last_3f_values.append(last_3f)
+                    except ValueError:
+                        pass
+
+                except Exception:
+                    continue
+
+            if not positions:
+                return default
+
+            total_races = len(positions)
+            total_wins = sum(1 for p in positions if p == 1)
+            total_places = sum(1 for p in positions if 1 <= p <= 3)
+
+            last5 = positions[:5]
+            avg_position_last5 = sum(last5) / len(last5) if last5 else 10.0
+
+            best_last_3f = min(last_3f_values) if last_3f_values else None
+            avg_last_3f = sum(last_3f_values) / len(last_3f_values) if last_3f_values else None
+
+            # Days since last race
+            days_since = 365
+            if race_dates:
+                try:
+                    last_date = race_dates[0].replace("/", "-")
+                    last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+                    days_since = (datetime.now() - last_dt).days
+                except Exception:
+                    pass
+
+            return HorseHistoryStats(
+                horse_id=netkeiba_horse_id,
+                total_races=total_races,
+                total_wins=total_wins,
+                total_places=total_places,
+                win_rate=round(total_wins / total_races, 3) if total_races > 0 else 0.0,
+                place_rate=round(total_places / total_races, 3) if total_races > 0 else 0.0,
+                avg_position_last5=round(avg_position_last5, 2),
+                best_last_3f=best_last_3f,
+                avg_last_3f=round(avg_last_3f, 2) if avg_last_3f else None,
+                days_since_last_race=days_since,
+            )
+
+        except Exception as e:
+            print(f"Error fetching stats for horse {netkeiba_horse_id}: {e}")
+            return default
 
     async def calculate_horse_stats(
         self,

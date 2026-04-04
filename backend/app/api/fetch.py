@@ -93,6 +93,7 @@ async def register_race_from_netkeiba(
             horse, _ = await horse_repo.get_or_create(
                 name=entry_info.horse_name,
                 trainer=entry_info.trainer,
+                netkeiba_id=entry_info.netkeiba_horse_id,
             )
             jockey, _ = await jockey_repo.get_or_create(
                 name=entry_info.jockey_name,
@@ -252,6 +253,7 @@ async def fetch_entries(
             horse, _ = await horse_repo.get_or_create(
                 name=entry_info.horse_name,
                 trainer=entry_info.trainer,
+                netkeiba_id=entry_info.netkeiba_horse_id,
             )
 
             # Get or create jockey
@@ -407,6 +409,7 @@ async def fetch_running_styles(
             )
 
         entry_repo = EntryRepository(db)
+        horse_repo = HorseRepository(db)
         entries = await entry_repo.get_by_race(race_id)
 
         updated_count = 0
@@ -420,6 +423,11 @@ async def fetch_running_styles(
                 await entry_repo.update(entry.id, {
                     "running_style": style_info.running_style,
                 })
+                # Also save netkeiba horse ID to Horse record
+                if style_info.horse_id and entry.horse_id:
+                    horse = await horse_repo.get(entry.horse_id)
+                    if horse and not horse.netkeiba_id:
+                        await horse_repo.update(horse.id, {"netkeiba_id": style_info.horse_id})
                 updated_count += 1
 
         return FetchResponse(

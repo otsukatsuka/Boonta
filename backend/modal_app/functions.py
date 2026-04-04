@@ -223,6 +223,26 @@ def predict(
     features = json.loads(features_json)
     df = pd.DataFrame(features)
 
+    # Fill missing columns that the model expects but aren't available at prediction time
+    prediction_defaults = {
+        "race_id": 0,
+        "race_name": "Unknown",
+        "race_date": "2026-01-01",
+        "horse_name": "Unknown",
+        "jockey_name": "Unknown",
+        "position": 0,
+        "time_seconds": 0.0,
+        "corner_positions": "",
+        "is_win": 0,
+        "total_races": 5,
+        "total_wins": 0,
+        "total_places": 1,
+        "days_since_last_race": 30,
+    }
+    for col, default in prediction_defaults.items():
+        if col not in df.columns:
+            df[col] = default
+
     df = preprocess_features(df)
     df = create_derived_features(df)
 

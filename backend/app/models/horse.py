@@ -14,6 +14,7 @@ class Horse(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    netkeiba_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sex: Mapped[str | None] = mapped_column(String(5), nullable=True)  # 牡/牝/セ
     trainer: Mapped[str | None] = mapped_column(String(50), nullable=True)
