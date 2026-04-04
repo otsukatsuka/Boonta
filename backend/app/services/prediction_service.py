@@ -47,6 +47,9 @@ class HorseAnalysis:
     odds: float | None = None
     popularity: int | None = None
 
+    # ローテーション
+    days_since_last_race: int = 30
+
     # 実績データの有無
     has_actual_stats: bool = False  # 実績データがあるかどうか
 
@@ -120,24 +123,33 @@ class PredictionService:
         return self._to_response(prediction)
 
     async def _analyze_all_horses(self, entries: list[RaceEntry], race_grade: str = "G1") -> dict[int, HorseAnalysis]:
-        """Analyze all horses based on entry data and race grade.
+        """Analyze all horses based on entry data and real performance stats.
 
-        IMPORTANT: This method now uses DEFAULT VALUES that are NOT biased by odds/popularity.
-        All horses start with similar baseline scores - differentiation comes from:
-        1. Running style fit with predicted pace
-        2. Actual performance data (when available from training data)
-        3. Track/distance aptitude
+        Fetches actual past performance data from netkeiba for horses with netkeiba_id.
+        Falls back to defaults for horses without netkeiba_id.
         """
+        from app.fetchers.netkeiba import NetkeibaFetcher
+
         analyses = {}
+
+        # Fetch real stats for horses with netkeiba_id
+        stats_map = {}
+        horses_with_id = [e for e in entries if e.horse and e.horse.netkeiba_id]
+        if horses_with_id:
+            async with NetkeibaFetcher() as fetcher:
+                for entry in horses_with_id:
+                    try:
+                        stats = await fetcher.fetch_horse_stats_via_ajax(entry.horse.netkeiba_id)
+                        stats_map[entry.horse_id] = stats
+                    except Exception as e:
+                        print(f"Failed to fetch stats for {entry.horse.name}: {e}")
 
         for entry in entries:
             if not entry.horse:
                 continue
 
-            # エントリーに設定された脚質を使用（fetch/oddsで設定済み）
             running_style = entry.running_style or "VERSATILE"
 
-            # 脚質から平均コーナー位置を推定
             style_to_corner = {
                 "ESCAPE": 1.5,
                 "FRONT": 4.0,
@@ -147,25 +159,26 @@ class PredictionService:
             }
             avg_first_corner = style_to_corner.get(running_style, 8.0)
 
-            # ==========================================
-            # デフォルト値 - オッズ/人気に依存しない！
-            # 全馬同じベースラインからスタート
-            # ==========================================
+            # Use real stats if available, otherwise defaults
+            stats = stats_map.get(entry.horse_id)
+            has_actual_stats = stats is not None and stats.total_races > 0
 
-            # 上がり3F: 全馬同じデフォルト値
-            # (脚質による差はペーススコアで反映)
-            avg_last_3f = 34.0
-            best_last_3f = 33.5
-
-            # 実績: 全馬同じデフォルト値 (G3平均に近い値)
-            win_rate = 0.10  # 10%
-            place_rate = 0.25  # 25%
-            avg_position_last5 = 5.0
-            grade_race_wins = 0
-
-            # 適性: デフォルトなし（ML or ペースで評価）
-            same_distance_place_rate = None
-            same_venue_place_rate = None
+            if has_actual_stats:
+                win_rate = stats.win_rate
+                place_rate = stats.place_rate
+                avg_position_last5 = stats.avg_position_last5
+                avg_last_3f = stats.avg_last_3f or 34.0
+                best_last_3f = stats.best_last_3f or 33.5
+                grade_race_wins = stats.grade_wins
+                days_since_last_race = stats.days_since_last_race
+            else:
+                win_rate = 0.10
+                place_rate = 0.25
+                avg_position_last5 = 5.0
+                avg_last_3f = 34.0
+                best_last_3f = 33.5
+                grade_race_wins = 0
+                days_since_last_race = 30
 
             analyses[entry.horse_id] = HorseAnalysis(
                 horse_id=entry.horse_id,
@@ -179,11 +192,12 @@ class PredictionService:
                 place_rate=place_rate,
                 grade_race_wins=grade_race_wins,
                 avg_position_last5=avg_position_last5,
-                same_distance_place_rate=same_distance_place_rate,
-                same_venue_place_rate=same_venue_place_rate,
-                odds=entry.odds,  # 参考情報として保持
-                popularity=entry.popularity,  # 参考情報として保持
-                has_actual_stats=False,  # 実績データなし
+                same_distance_place_rate=None,
+                same_venue_place_rate=None,
+                odds=entry.odds,
+                popularity=entry.popularity,
+                days_since_last_race=days_since_last_race,
+                has_actual_stats=has_actual_stats,
             )
 
         return analyses
@@ -263,8 +277,8 @@ class PredictionService:
     ) -> dict[int, float]:
         """Get ML model predictions for place probability via Modal.
 
-        IMPORTANT: This method now provides features WITHOUT odds/popularity.
-        The ML model should be trained without these features as well.
+        NOTE: Current model was trained WITH odds/popularity features.
+        To train without them, retrain the model after removing these columns.
         """
         from modal_app.client import get_modal_client
 
@@ -292,17 +306,28 @@ class PredictionService:
 
             row = {
                 "horse_number": analysis.horse_number,
-                "running_style_code": running_style_code,
-                "distance": race.distance,
-                "is_turf": is_turf,
-                "grade_code": grade_code,
+                "post_position": entry.post_position or analysis.horse_number,
+                "odds": entry.odds or 10.0,
+                "popularity": entry.popularity or 8,
                 "weight": entry.weight or 55.0,
                 "horse_weight": entry.horse_weight or 480,
-                "last_3f": analysis.best_last_3f,
+                "distance": race.distance,
+                "course_type": race.course_type or "芝",
+                "venue": race.venue or "",
+                "track_condition": race.track_condition or "良",
+                "weather": race.weather or "晴",
+                "grade": race.grade or "G1",
+                "running_style": analysis.running_style,
                 "win_rate": analysis.win_rate,
                 "place_rate": analysis.place_rate,
                 "avg_position_last5": analysis.avg_position_last5,
+                "avg_last_3f": analysis.avg_last_3f,
+                "best_last_3f": analysis.best_last_3f,
                 "grade_wins": analysis.grade_race_wins,
+                "horse_name": analysis.horse_name,
+                "jockey_name": entry.jockey.name if entry.jockey else "Unknown",
+                "horse_weight_diff": entry.horse_weight_diff or 0,
+                "days_since_last_race": analysis.days_since_last_race,
             }
             data.append(row)
             horse_ids.append(entry.horse_id)
@@ -372,19 +397,19 @@ class PredictionService:
 
             # 総合スコア
             if use_ml:
-                # MLモデルがある場合: ML予測を重視
+                # MLモデルがある場合: ML予測を重視しつつ実績も反映
                 total_score = (
-                    ml_score * 0.45 +          # ML予測（オッズなし学習）
-                    pace_score * 0.35 +        # 展開適性
-                    last_3f_score * 0.1 +      # 上がり能力
-                    track_record_score * 0.1   # 実績
+                    ml_score * 0.40 +          # ML予測
+                    pace_score * 0.25 +        # 展開適性
+                    last_3f_score * 0.15 +     # 上がり能力
+                    track_record_score * 0.20  # 実績
                 )
             else:
-                # MLモデルがない場合: 展開を最重視
+                # MLモデルがない場合: 実績を最重視
                 total_score = (
-                    pace_score * 0.50 +        # 展開適性を最重視
+                    pace_score * 0.35 +        # 展開適性
                     last_3f_score * 0.25 +     # 上がり能力
-                    track_record_score * 0.25  # 実績
+                    track_record_score * 0.40  # 実績
                 )
 
             rankings.append(HorsePrediction(
@@ -477,14 +502,14 @@ class PredictionService:
 
         style = analysis.running_style
 
-        # 1. 基本の展開スコア（展開との相性）
+        # 1. 基本の展開スコア（展開との相性）差を縮小して脚質偏重を防ぐ
         if style in pace.advantageous_styles:
-            base = 0.3
+            base = 0.25
             # 第1有利脚質はさらにボーナス
             if style == pace.advantageous_styles[0]:
-                base = 0.35
+                base = 0.30
         else:
-            base = 0.1
+            base = 0.15
 
         # 2. 競馬場特性による調整
         if race and race.venue:
@@ -517,9 +542,9 @@ class PredictionService:
             )
             base *= post_effect
 
-        # 5. ハイペース時は上がり能力も考慮
-        if pace.type == "high" and analysis.best_last_3f <= 33.5:
-            base += 0.1
+        # 5. ハイペース時は上がり能力も考慮（閾値を厳しくしデフォルト値で発動しない）
+        if pace.type == "high" and analysis.best_last_3f <= 33.0:
+            base += 0.08
 
         # 6. スローペース時は位置取りの良さを考慮
         if pace.type == "slow" and analysis.avg_first_corner <= 5:
@@ -560,21 +585,25 @@ class PredictionService:
         """Calculate score based on track record."""
         score = 0.0
 
-        # 勝率
-        score += analysis.win_rate * 0.4
+        # 勝率（影響拡大）
+        score += min(analysis.win_rate * 0.5, 0.3)
 
-        # 複勝率
-        score += analysis.place_rate * 0.3
+        # 複勝率（影響拡大）
+        score += min(analysis.place_rate * 0.4, 0.25)
 
         # 重賞実績
         if analysis.grade_race_wins >= 3:
-            score += 0.3
-        elif analysis.grade_race_wins >= 1:
             score += 0.2
-        elif analysis.grade_race_wins == 0:
-            score += 0.05
+        elif analysis.grade_race_wins >= 1:
+            score += 0.1
 
-        return min(score, 0.4)
+        # 直近成績（avg_position_last5で差別化）
+        if analysis.avg_position_last5 <= 3.0:
+            score += 0.15
+        elif analysis.avg_position_last5 <= 5.0:
+            score += 0.08
+
+        return min(score, 0.5)
 
     def _generate_bets(
         self,
@@ -717,16 +746,21 @@ class PredictionService:
         if not rankings:
             return 0.0
 
-        confidence = pace.confidence * 0.4
+        confidence = pace.confidence * 0.3
 
-        # トップ馬のスコア差
+        # トップ馬のスコア差（係数を拡大）
         if len(rankings) >= 2:
             score_diff = rankings[0].score - rankings[1].score
-            confidence += min(score_diff * 3, 0.3)
+            confidence += min(score_diff * 5, 0.3)
 
-        # データの充実度
-        data_quality = sum(1 for a in analyses.values() if a.avg_last_3f < 35.0) / max(len(analyses), 1)
-        confidence += data_quality * 0.2
+        # データの充実度（実データがある馬の割合も加味）
+        has_real_data = sum(
+            1 for a in analyses.values() if a.avg_last_3f != 34.0
+        ) / max(len(analyses), 1)
+        data_quality = sum(
+            1 for a in analyses.values() if a.avg_last_3f < 35.0
+        ) / max(len(analyses), 1)
+        confidence += max(has_real_data, data_quality) * 0.25
 
         return min(confidence + 0.1, 1.0)
 

@@ -40,6 +40,7 @@ class EntryInfo:
     horse_weight: int | None = None
     horse_weight_diff: int | None = None
     trainer: str | None = None
+    netkeiba_horse_id: str | None = None
 
 
 @dataclass

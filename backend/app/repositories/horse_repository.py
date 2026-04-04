@@ -44,9 +44,14 @@ class HorseRepository(BaseRepository[Horse]):
         return result.scalar_one_or_none()
 
     async def get_or_create(self, name: str, **kwargs) -> tuple[Horse, bool]:
-        """Get existing horse or create new one."""
+        """Get existing horse or create new one. Updates netkeiba_id if provided."""
         horse = await self.get_by_name(name)
         if horse:
+            # Update netkeiba_id if not yet set
+            netkeiba_id = kwargs.get("netkeiba_id")
+            if netkeiba_id and not horse.netkeiba_id:
+                await self.update(horse.id, {"netkeiba_id": netkeiba_id})
+                horse.netkeiba_id = netkeiba_id
             return horse, False
 
         horse = await self.create({"name": name, **kwargs})

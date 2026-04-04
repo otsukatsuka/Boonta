@@ -437,8 +437,8 @@ class TestTrackRecordScoreCalculation:
 
         assert score_3 > score_1 > score_0
 
-    def test_score_bounded_at_0_4(self, db_session):
-        """Score should be bounded at 0.4."""
+    def test_score_bounded_at_0_5(self, db_session):
+        """Score should be bounded at 0.5."""
         service = PredictionService(db_session)
 
         # Max values
@@ -451,7 +451,7 @@ class TestTrackRecordScoreCalculation:
         )
 
         score = service._calculate_track_record_score(analysis)
-        assert score <= 0.4
+        assert score <= 0.5
 
 
 class TestDarkHorseDetection:
