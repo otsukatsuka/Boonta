@@ -109,7 +109,7 @@ def create_derived_features(df):
 @app.function(
     image=autogluon_image,
     volumes={VOLUME_PATH: model_volume},
-    timeout=3600,
+    timeout=7200,
     memory=8192,
     cpu=4.0,
 )
@@ -118,6 +118,7 @@ def train_model(
     model_name: str = "place_predictor",
     time_limit: int = 1800,
     presets: str = "best_quality",
+    excluded_model_types: list[str] | None = None,
 ) -> dict:
     """Train AutoGluon model on Modal."""
     from datetime import datetime, timezone
@@ -142,10 +143,10 @@ def train_model(
 
     model_path = f"{VOLUME_PATH}/{model_name}"
 
-    # Use "extreme" preset for small datasets (new in AutoGluon 1.5.0)
-    if len(df) < 30000 and presets == "best_quality":
-        presets = "extreme"
-        print("Using 'extreme' preset for small dataset (<30k samples)")
+    # Note: "extreme" preset requires tabpfn/tabdpt/tabicl/mitra dependencies
+    # which are not installed in the Modal image. Use "best_quality" for CPU environments.
+    if presets == "extreme":
+        print("Warning: 'extreme' preset may require GPU and extra dependencies. Consider 'best_quality' for CPU.")
 
     predictor = TabularPredictor(
         label="is_place",
@@ -154,11 +155,15 @@ def train_model(
         eval_metric="roc_auc",
     )
 
-    predictor.fit(
-        train_data=df,
-        time_limit=time_limit,
-        presets=presets,
-    )
+    fit_kwargs = {
+        "train_data": df,
+        "time_limit": time_limit,
+        "presets": presets,
+    }
+    if excluded_model_types:
+        fit_kwargs["excluded_model_types"] = excluded_model_types
+
+    predictor.fit(**fit_kwargs)
 
     leaderboard = predictor.leaderboard()
     best_score = float(leaderboard.iloc[0]["score_val"]) if len(leaderboard) > 0 else None

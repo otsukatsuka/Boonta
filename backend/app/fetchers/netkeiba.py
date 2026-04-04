@@ -4,6 +4,7 @@ import asyncio
 import re
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -801,34 +802,46 @@ class NetkeibaFetcher(DataFetcher):
 
             print(f"Selenium: Found {len(horse_data)} horses with IDs")
 
-            # Now fetch past results for each horse
+            # Fetch past results for each horse via AJAX (faster than Selenium page loads)
+            ajax_client = httpx.Client(
+                timeout=10.0,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                },
+            )
             for horse in horse_data:
                 try:
-                    horse_url = f"{self.DB_URL}/horse/{horse['horse_id']}/"
                     print(f"Fetching results for {horse['horse_name']}...")
-                    driver.get(horse_url)
-                    time.sleep(1.5)
+                    time.sleep(1.0)
 
-                    # Find result table
-                    result_rows = driver.find_elements(
-                        By.CSS_SELECTOR, "table.db_h_race_results tr"
+                    ajax_url = f"{self.DB_URL}/horse/ajax_horse_results.html"
+                    resp = ajax_client.get(
+                        ajax_url,
+                        params={"input": "UTF-8", "output": "json", "id": horse["horse_id"]},
                     )
 
                     corner_positions_list = []
-                    for result_row in result_rows[:10]:  # Last 10 races
-                        try:
-                            cols = result_row.find_elements(By.TAG_NAME, "td")
-                            if len(cols) < 22:
-                                continue
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("status") == "OK":
+                            from bs4 import BeautifulSoup as BS4
+                            soup = BS4(data["data"], "lxml")
+                            result_rows = soup.select("table.db_h_race_results tbody tr")
 
-                            # Corner positions (column 21)
-                            corner_text = cols[21].text.strip()
-                            corners = self._parse_corner_positions(corner_text)
-                            if corners and len(corners) >= 1:
-                                corner_positions_list.append(corners[0])  # 1st corner
+                            for result_row in result_rows[:10]:  # Last 10 races
+                                try:
+                                    cols = result_row.select("td")
+                                    if len(cols) < 26:
+                                        continue
 
-                        except Exception:
-                            continue
+                                    # Corner positions (column 25 - "通過")
+                                    corner_text = cols[25].get_text(strip=True)
+                                    corners = self._parse_corner_positions(corner_text)
+                                    if corners and len(corners) >= 1:
+                                        corner_positions_list.append(corners[0])  # 1st corner
+
+                                except Exception:
+                                    continue
 
                     # Calculate average first corner position
                     if corner_positions_list:
@@ -860,6 +873,7 @@ class NetkeibaFetcher(DataFetcher):
                         avg_first_corner=None,
                         race_count=0,
                     ))
+            ajax_client.close()
 
         except Exception as e:
             print(f"Selenium error: {e}")
