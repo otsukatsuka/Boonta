@@ -38,7 +38,7 @@ FIELD_TO_FEATURE: dict[str, str] = {
     "馬番": "horse_number",
     "枠番": "waku",
     "基準オッズ": "odds",
-    "基準���気順位": "popularity",
+    "基準人気順位": "popularity",
     "負担重量": "weight_carried",
 }
 

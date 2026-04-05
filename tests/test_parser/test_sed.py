@@ -1,6 +1,6 @@
 """Tests for SED field definitions with spec-compliant binary fixtures."""
 from src.parser.engine import parse_record
-from src.parser.sed import SED_FIELDS, RECORD_LENGTH
+from src.parser.sed import RECORD_LENGTH, SED_FIELDS
 
 
 def _make_sed_record(**overrides: tuple[int, str]) -> bytes:
@@ -26,7 +26,7 @@ def _make_sed_record(**overrides: tuple[int, str]) -> bytes:
         "頭数": (131, "16"),
         "着順": (141, "01"),
         "異常区分": (143, "0"),
-        "タイ��": (144, "2001"),  # 2:00.1
+        "タイム": (144, "2001"),  # 2:00.1
         "確定単勝オッズ": (175, "   5.2"),
         "テン指数": (224, " 48.5"),
         "上がり指数": (229, " 53.1"),

@@ -1,9 +1,8 @@
 """Tests for feature engineering pipeline."""
 import numpy as np
 import pandas as pd
-import pytest
 
-from src.features.columns import FEATURE_COLUMNS, LABEL_COLUMN
+from src.features.columns import LABEL_COLUMN
 from src.features.derived import add_derived_features
 from src.features.engineering import (
     build_prediction_features,
