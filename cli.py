@@ -146,6 +146,88 @@ def predict(date_str: str, race_number: int | None, no_ml: bool):
     click.echo(output)
 
 
+@cli.command()
+@click.option("--date-range", nargs=2, required=True, help="Start and end dates (YYYYMMDD)")
+@click.option("--strategy", default="fukusho_top3",
+              type=click.Choice(["fukusho_top3", "umaren_top2", "sanrenpuku_top3"]))
+def evaluate(date_range: tuple[str, str], strategy: str):
+    """Evaluate ROI using predictions and HJC payoff data."""
+    from src.features.engineering import build_prediction_features
+    from src.model.client import ModalClient
+    from src.parser import (
+        HJC_FIELDS, HJC_RECORD_LENGTH,
+        KYI_FIELDS, KYI_RECORD_LENGTH,
+    )
+    from src.parser.engine import build_race_key, parse_file
+    from src.predict.roi import evaluate_roi
+
+    settings = Settings()
+
+    click.echo(f"Evaluating ROI ({strategy}) for {date_range[0]} to {date_range[1]}...")
+
+    # Parse KYI files
+    kyi_frames = []
+    for path in sorted(settings.data_raw_dir.glob("KYI*.txt")):
+        kyi_frames.append(parse_file(path, KYI_FIELDS, KYI_RECORD_LENGTH))
+
+    if not kyi_frames:
+        click.echo("No KYI files found")
+        return
+
+    kyi_df = pd.concat(kyi_frames, ignore_index=True)
+    features_df = build_prediction_features(kyi_df)
+
+    # Get predictions from Modal
+    click.echo("Getting predictions from Modal...")
+    client = ModalClient()
+    all_predictions = []
+
+    for race_key, race_df in features_df.groupby("race_key"):
+        feature_cols = [c for c in race_df.columns
+                       if c not in ("race_key", "horse_number", "horse_name")]
+        features_list = race_df[feature_cols].to_dict("records")
+
+        try:
+            result = client.predict(features_list)
+            if result.get("success"):
+                race_df = race_df.copy()
+                race_df["predict_prob"] = result["predictions"]
+                all_predictions.append(race_df[["race_key", "horse_number", "predict_prob"]])
+        except Exception as e:
+            click.echo(f"  Prediction failed for {race_key}: {e}")
+
+    if not all_predictions:
+        click.echo("No predictions generated")
+        return
+
+    predictions_df = pd.concat(all_predictions, ignore_index=True)
+
+    # Parse HJC files
+    hjc_frames = []
+    for path in sorted(settings.data_raw_dir.glob("HJC*.txt")):
+        df = parse_file(path, HJC_FIELDS, HJC_RECORD_LENGTH)
+        df["race_key"] = df.apply(lambda row: build_race_key(row.to_dict()), axis=1)
+        hjc_frames.append(df)
+
+    if not hjc_frames:
+        click.echo("No HJC files found")
+        return
+
+    hjc_df = pd.concat(hjc_frames, ignore_index=True)
+
+    # Evaluate ROI
+    result = evaluate_roi(predictions_df, hjc_df, strategy)
+
+    click.echo(f"\n{'=' * 40}")
+    click.echo(f"戦略: {result['strategy']}")
+    click.echo(f"レース数: {result['race_count']}")
+    click.echo(f"投資額: {result['total_bets']:,}円")
+    click.echo(f"回収額: {result['total_return']:,}円")
+    click.echo(f"回収率: {result['roi']}%")
+    click.echo(f"的中数: {result['hit_count']}")
+    click.echo(f"{'=' * 40}")
+
+
 def _generate_dates(start: str, end: str) -> list[str]:
     """Generate YYMMDD date strings from YYYYMMDD range."""
     from datetime import datetime, timedelta
