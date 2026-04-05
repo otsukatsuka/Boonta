@@ -10,8 +10,8 @@ def _make_kyi_file(n_horses: int = 3) -> Path:
     """Create a minimal KYI file for testing."""
     records = []
     for i in range(1, n_horses + 1):
-        data = bytearray(1024)
-        for j in range(1024):
+        data = bytearray(1022)
+        for j in range(1022):
             data[j] = 0x20
 
         def put(offset, value, encoding="cp932"):

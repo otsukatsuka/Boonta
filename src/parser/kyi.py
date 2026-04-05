@@ -1,7 +1,7 @@
 """KYI (競走馬データ) field definitions. Record length: 1024 bytes (+2 CRLF)."""
 from src.parser.spec import FieldSpec
 
-RECORD_LENGTH = 1026  # 1024 data + 2 CRLF
+RECORD_LENGTH = 1024  # JRDB spec "1024 BYTE" includes CRLF
 
 # fmt: off
 KYI_FIELDS: list[FieldSpec] = [

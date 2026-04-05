@@ -5,9 +5,9 @@ from src.parser.hjc import HJC_FIELDS, RECORD_LENGTH
 
 def _make_hjc_record() -> bytes:
     """Build a 444-byte HJC record with sample payoff data."""
-    data = bytearray(444)
-    for i in range(444):
-        data[i] = 0x20
+    data = bytearray(442)
+    for i in range(442):
+        data[i] = 0x20  # 442 data bytes + 2 CRLF = 444
 
     def put(offset_1based: int, value: str):
         encoded = value.encode("cp932")
@@ -56,7 +56,7 @@ class TestHJCFields:
         assert len(HJC_FIELDS) > 60
 
     def test_record_length(self):
-        assert RECORD_LENGTH == 446
+        assert RECORD_LENGTH == 444
 
     def test_race_key(self):
         record = parse_record(_make_hjc_record(), HJC_FIELDS)

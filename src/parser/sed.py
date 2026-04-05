@@ -1,7 +1,7 @@
 """SED (成績データ) field definitions. Record length: 376 bytes (+2 CRLF)."""
 from src.parser.spec import FieldSpec
 
-RECORD_LENGTH = 378  # 376 data + 2 CRLF
+RECORD_LENGTH = 376  # JRDB spec "376 BYTE" includes CRLF
 
 # fmt: off
 SED_FIELDS: list[FieldSpec] = [

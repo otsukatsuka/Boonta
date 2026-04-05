@@ -5,7 +5,7 @@ We flatten them into individual columns: e.g. 単勝馬番_1, 単勝払戻_1, et
 """
 from src.parser.spec import FieldSpec
 
-RECORD_LENGTH = 446  # 444 data + 2 CRLF
+RECORD_LENGTH = 444  # JRDB spec "444 BYTE" includes CRLF
 
 
 def _build_hjc_fields() -> list[FieldSpec]:

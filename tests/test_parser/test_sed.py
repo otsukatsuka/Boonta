@@ -5,9 +5,9 @@ from src.parser.sed import RECORD_LENGTH, SED_FIELDS
 
 def _make_sed_record(**overrides: tuple[int, str]) -> bytes:
     """Build a 376-byte SED record."""
-    data = bytearray(376)
-    for i in range(376):
-        data[i] = 0x20
+    data = bytearray(374)
+    for i in range(374):
+        data[i] = 0x20  # 374 data bytes + 2 CRLF = 376
 
     defaults = {
         "場コード": (1, "06"),
@@ -59,7 +59,7 @@ class TestSEDFields:
         assert len(SED_FIELDS) > 50
 
     def test_record_length(self):
-        assert RECORD_LENGTH == 378
+        assert RECORD_LENGTH == 376
 
     def test_race_key(self):
         record = parse_record(_make_sed_record(), SED_FIELDS)
