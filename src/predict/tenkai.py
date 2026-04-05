@@ -98,7 +98,9 @@ def _format_pace(df: pd.DataFrame) -> str:
 def _format_position_table(df: pd.DataFrame) -> str:
     """Format position forecast table."""
     lines = ["■ 位置取り予想"]
-    lines.append(f"  {'馬番':>4}  {'馬名':<14}  {'脚質':<4}  {'道中':>4}  {'後3F':>4}  {'ゴール':>4}  {'内外'}")
+    header = f"  {'馬番':>4}  {'馬名':<14}  {'脚質':<4}  {'道中':>4}  {'後3F':>4}"
+    header += f"  {'ゴール':>4}  {'内外'}"
+    lines.append(header)
 
     sorted_df = df.sort_values("goal_position") if "goal_position" in df.columns else df
 

@@ -10,7 +10,6 @@ import lhafile
 
 from config.settings import Settings
 
-
 # File type configuration: (URL path prefix, archive format, file prefix)
 FILE_TYPES = {
     "KYI": ("Kyi/", "zip", "KYI"),
