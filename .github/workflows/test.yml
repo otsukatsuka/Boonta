@@ -4,12 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - 'backend/**'
+      - 'src/**'
+      - 'config/**'
+      - 'cli.py'
+      - 'tests/**'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'backend/**'
+      - 'src/**'
+      - 'config/**'
+      - 'cli.py'
+      - 'tests/**'
 
 jobs:
   test:
@@ -30,29 +36,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('backend/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
 
-      - name: Install dependencies (without AutoGluon)
+      - name: Install dependencies
         run: |
-          cd backend
           python -m pip install --upgrade pip
-          pip install fastapi uvicorn sqlalchemy aiosqlite pydantic pydantic-settings
-          pip install httpx beautifulsoup4 lxml pandas numpy selenium webdriver-manager
-          pip install pytest pytest-asyncio pytest-cov
-          pip install modal
+          pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: |
-          cd backend
-          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+        run: pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         timeout-minutes: 2
         continue-on-error: true
         with:
-          files: backend/coverage.xml
-          flags: backend
+          files: coverage.xml
           fail_ci_if_error: false
