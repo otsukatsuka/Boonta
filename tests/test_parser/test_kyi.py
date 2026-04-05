@@ -9,9 +9,9 @@ def _make_full_kyi_record(**overrides: tuple[int, str]) -> bytes:
     Args:
         overrides: dict of {field_name: (offset_1based, value_str)} to place.
     """
-    data = bytearray(1024)
-    for i in range(1024):
-        data[i] = 0x20  # fill with spaces
+    data = bytearray(1022)
+    for i in range(1022):
+        data[i] = 0x20  # fill with spaces (1022 data bytes + 2 CRLF = 1024)
 
     # Default race key + horse info
     defaults = {
@@ -73,7 +73,7 @@ class TestKYIFields:
         assert len(KYI_FIELDS) > 80
 
     def test_record_length(self):
-        assert RECORD_LENGTH == 1026
+        assert RECORD_LENGTH == 1024
 
     def test_race_key(self):
         record = parse_record(_make_full_kyi_record(), KYI_FIELDS)

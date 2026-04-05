@@ -56,6 +56,19 @@ def parse_file(
     return pd.DataFrame(records)
 
 
+def _safe_int(val: object) -> int:
+    """Convert a value to int, handling None, NaN, and float."""
+    if val is None:
+        return 0
+    try:
+        f = float(val)
+        if f != f:  # NaN check
+            return 0
+        return int(f)
+    except (ValueError, TypeError):
+        return 0
+
+
 def build_race_key(record: dict[str, object]) -> str:
     """Build an 8-character race key from parsed record fields.
 
@@ -64,11 +77,10 @@ def build_race_key(record: dict[str, object]) -> str:
     The 日 field is hex-encoded in the original data and stored as int after parsing.
     We convert it back to a single hex character for the key.
     """
-    basho = int(record.get("場コード") or 0)
-    nen = int(record.get("年") or 0)
-    kai = int(record.get("回") or 0)
-    nichi = record.get("日") or 0
-    r = int(record.get("R") or 0)
-    # 日 is already parsed as int from hex; convert back to hex char
-    nichi_hex = format(int(nichi), "x")
+    basho = _safe_int(record.get("場コード"))
+    nen = _safe_int(record.get("年"))
+    kai = _safe_int(record.get("回"))
+    nichi = _safe_int(record.get("日"))
+    r = _safe_int(record.get("R"))
+    nichi_hex = format(nichi, "x")
     return f"{basho:02d}{nen:02d}{kai}{nichi_hex}{r:02d}"

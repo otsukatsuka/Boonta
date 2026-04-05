@@ -18,11 +18,12 @@ def _make_kyi_record_bytes(
     touroku: str = "12345678",
     bamei: str = "ドウデュース",
     idm: str = " 52.3",
-    total_length: int = 1024,
+    total_length: int = 1022,
 ) -> bytes:
     """Build a minimal KYI record with known fields for testing.
 
-    Fills remaining bytes with spaces to match record_length.
+    Fills remaining bytes with spaces. CRLF is added separately.
+    JRDB record_length (1024) includes CRLF, so data is 1022 bytes.
     """
     # Build the record in CP932
     data = bytearray(total_length)
@@ -80,7 +81,7 @@ class TestParseRecord:
 
     def test_empty_fields(self):
         """All-space record should produce None for numeric/decimal fields."""
-        line = b" " * 1024
+        line = b" " * 1022
         record = parse_record(line, MINI_FIELDS)
         assert record["場コード"] is None
         assert record["IDM"] is None
@@ -97,7 +98,7 @@ class TestParseFile:
             f.flush()
             path = Path(f.name)
 
-        df = parse_file(path, MINI_FIELDS, 1026)
+        df = parse_file(path, MINI_FIELDS, 1024)
         assert len(df) == 1
         assert df.iloc[0]["馬番"] == 3
         assert df.iloc[0]["馬名"] == "ドウデュース"
@@ -113,7 +114,7 @@ class TestParseFile:
             f.flush()
             path = Path(f.name)
 
-        df = parse_file(path, MINI_FIELDS, 1026)
+        df = parse_file(path, MINI_FIELDS, 1024)
         assert len(df) == 2
         assert df.iloc[0]["馬番"] == 1
         assert df.iloc[1]["馬番"] == 2
@@ -125,7 +126,7 @@ class TestParseFile:
             f.write(rec)
             path = Path(f.name)
 
-        result = parse_file(path, MINI_FIELDS, 1026)
+        result = parse_file(path, MINI_FIELDS, 1024)
         assert isinstance(result, pd.DataFrame)
         path.unlink()
 
