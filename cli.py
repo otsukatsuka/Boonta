@@ -16,7 +16,10 @@ def cli():
 @cli.command()
 @click.option("--type", "file_type", required=True, type=click.Choice(["KYI", "SED", "HJC"]))
 @click.option("--date", "date_str", help="Date in YYMMDD format (e.g. 260405)")
-@click.option("--date-range", "date_range", nargs=2, help="Start and end dates (YYYYMMDD)")
+@click.option(
+    "--date-range", "date_range", nargs=2,
+    help="Start and end dates in YYYYMMDD format (e.g. 20250101 20251231)",
+)
 def download(file_type: str, date_str: str | None, date_range: tuple[str, str] | None):
     """Download JRDB files."""
     from src.download.jrdb import JRDBDownloader
@@ -257,9 +260,12 @@ def _parse_files(settings: Settings, fields: list, rec_len: int, prefix: str, ft
 
     all_frames = []
     for path in paths:
-        df = parse_file(path, fields, rec_len)
-        all_frames.append(df)
-        click.echo(f"  Parsed {path.name}: {len(df)} records")
+        try:
+            df = parse_file(path, fields, rec_len)
+            all_frames.append(df)
+            click.echo(f"  Parsed {path.name}: {len(df)} records")
+        except Exception as e:
+            click.echo(f"  Error parsing {path.name}: {e}", err=True)
 
     if all_frames:
         combined = pd.concat(all_frames, ignore_index=True)

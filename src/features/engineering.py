@@ -89,10 +89,16 @@ def build_training_features(
     kyi = _convert_weight(kyi)
 
     # Join on race_key + horse_number
+    # After _rename_to_features(), 馬番 is already horse_number in both DFs.
+    # SED: 着順 (label) and 異常区分 (filter) are not in FIELD_TO_FEATURE.
+    sed_cols = ["race_key", "horse_number"]
+    if "着順" in sed.columns:
+        sed_cols.append("着順")
+    if "異常区分" in sed.columns:
+        sed_cols.append("異常区分")
+
     merged = kyi.merge(
-        sed[["race_key", "horse_number", "着順", "異常区分"]].rename(
-            columns={"馬番": "horse_number"}
-        ) if "馬番" in sed.columns else sed[["race_key", "horse_number", "着順", "異常区分"]],
+        sed[sed_cols],
         on=["race_key", "horse_number"],
         how="inner",
         suffixes=("", "_sed"),
@@ -144,4 +150,6 @@ def build_prediction_features(kyi_df: pd.DataFrame) -> pd.DataFrame:
     available = [c for c in FEATURE_COLUMNS if c in kyi.columns]
     keep_meta = [c for c in meta_cols if c in kyi.columns]
 
-    return kyi[keep_meta + available].copy()
+    # Avoid duplicate columns (horse_number is in both meta and features)
+    all_cols = list(dict.fromkeys(keep_meta + available))
+    return kyi[all_cols].copy()

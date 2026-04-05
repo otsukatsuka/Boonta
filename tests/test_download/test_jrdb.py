@@ -1,7 +1,6 @@
 """Tests for JRDB downloader with mock HTTP responses."""
 import io
 import zipfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx

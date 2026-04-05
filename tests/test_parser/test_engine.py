@@ -1,6 +1,6 @@
 """Tests for parse_record, parse_file, and build_race_key."""
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import pandas as pd
 

@@ -5,7 +5,6 @@ AutoGluon is NOT imported - only preprocessing functions are tested.
 """
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.model.functions import (
     CATEGORICAL_COLS,
