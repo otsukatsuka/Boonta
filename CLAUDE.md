@@ -4,323 +4,168 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Boonta is a horse racing prediction AI service for Japanese G1 races. It uses machine learning (AutoGluon 1.5.0 on Modal.com) to predict race outcomes based on historical data, running styles, jockey statistics, and workout information.
+Boonta v2 is a horse racing prediction system for Japanese races using JRDB data. It parses JRDB fixed-length files (KYI/SED/HJC), engineers features from JRDB indices, and runs ML predictions via AutoGluon on Modal.com. The interface is a CLI pipeline (click), replacing the v1 FastAPI + React architecture.
+
+### Key Changes from v1
+
+| Item | v1 | v2 |
+|------|----|----|
+| Data Source | netkeiba.com (HTML scraping) | JRDB (fixed-length text files) |
+| Architecture | FastAPI + React + SQLite | Python CLI pipeline |
+| ML Features | 34 (scraping-derived) | ~35 (JRDB index-based) |
+| Race Forecast | Rule-based (pace.py) | JRDB forecast data + ML |
+| Interface | Web app + Docker | CLI + Modal.com |
+| ROI Evaluation | None | HJC payoff data |
+
+### Inherited from v1
+
+- Modal.com infrastructure (App "boonta-ml", Volume "boonta-models")
+- AutoGluon config (binary classification, ROC-AUC, best_quality preset)
+- Self-contained Modal functions pattern (no external imports, inline preprocessing)
 
 ## Development Commands
 
-### Frontend (React + Vite + TypeScript)
-
 ```bash
-cd frontend
-npm run dev      # Start dev server at http://localhost:5173
-npm run build    # TypeScript check + production build
-npm run lint     # ESLint check
-npm run preview  # Preview production build
+# Setup
+pip install -e ".[dev]"
+
+# CLI
+python cli.py download --type KYI --date 2026-04-05
+python cli.py parse --type KYI --date 2026-04-05
+python cli.py train --date-range 2020-01-01 2025-12-31 --time-limit 1800
+python cli.py predict --date 2026-04-05
+python cli.py evaluate --date-range 2025-01-01 2025-12-31
+
+# Quality
+ruff check src/ cli.py config/
+mypy src/ cli.py config/
+pytest
+pytest tests/test_parser/ -v
+pytest -k "test_name" -v
+pytest --cov=src --cov-report=html
+
+# Modal
+modal deploy src/model/functions.py
+modal run src/model/functions.py::test_status
+modal run src/model/functions.py::test_train
 ```
 
-### Backend (Python + FastAPI)
-
-```bash
-cd backend
-pip install -r requirements.txt        # Install dependencies
-pip install -e ".[dev]"                 # Install with dev dependencies
-uvicorn app.main:app --reload          # Start dev server at http://localhost:8000
-
-# Linting and testing
-ruff check app/                         # Lint Python code
-mypy app/                               # Type checking
-pytest                                  # Run tests
-pytest tests/path/to/test.py -v        # Run single test file
-pytest -k "test_name" -v               # Run specific test
-```
-
-### Modal (ML Environment)
-
-```bash
-cd backend
-
-# Authentication (first time only)
-modal token new
-
-# Deploy Modal app (MUST do before training if code changed)
-modal deploy modal_app/functions.py
-
-# Test locally before deploying
-modal run modal_app/functions.py::test_status    # Check model status
-modal run modal_app/functions.py::test_train     # Run test training
-
-# Upload existing local model to Modal Volume
-modal run scripts/upload_model_to_modal.py
-
-# Monitor via dashboard
-modal dashboard                                  # Opens browser with real-time logs
-```
-
-**Important**: Always use `best_quality` preset for CPU training. Do NOT use `extreme` preset — it requires GPU and dependencies (TabPFN, TabDPT, TabICL, Mitra) not installed in the Modal image.
-
-### Docker
-
-```bash
-docker compose up --build              # Build and start all services
-docker compose up -d                   # Start in background
-docker compose down                    # Stop all services
-docker compose logs -f backend         # View backend logs
-docker compose logs -f frontend        # View frontend logs
-```
-
-When running with Docker:
-- Frontend: http://localhost (port 80)
-- Backend API: http://localhost:8000
-- Data persisted in `backend/data/` and `backend/models/`
+**Important**: Always use `best_quality` preset for AutoGluon. Do NOT use `extreme` preset.
 
 ## Architecture
 
-### ML Architecture (Modal.com)
-
-ML training and prediction runs on Modal.com, not locally:
+### Data Pipeline
 
 ```
-┌─────────────────┐      ┌─────────────────────────────┐
-│  FastAPI        │      │  Modal.com                  │
-│  (Local)        │◄────►│  Python 3.12 + AutoGluon    │
-│  modal_app/     │      │                             │
-│  client.py      │      │  modal_app/functions.py     │
-└─────────────────┘      │  - train_model()            │
-                         │  - predict()                │
-                         │  - get_model_status()       │
-                         │  - get_feature_importance() │
-                         │                             │
-                         │  Modal Volume               │
-                         │  └── boonta-models/         │
-                         └─────────────────────────────┘
+JRDB Server → data/raw/ (KYI/SED/HJC) → data/processed/ (CSV) → Features DataFrame
+                download/         parser/              features/
+                                                          │
+                                                    ┌─────┘
+                                                    ▼
+                                              Modal.com (AutoGluon)
+                                              train_model() / predict()
+                                                    │
+                                                    ▼
+                                              展開予想 Output + ROI Evaluation
 ```
 
-### Backend Structure (`backend/app/`)
+### Source Structure (`src/`)
 
-Layered architecture with clear separation of concerns:
+- **download/** - JRDB HTTP downloader with auth + ZIP/LZH extraction
+- **parser/** - Fixed-length file parser engine + KYI/SED/HJC field specs
+- **features/** - Feature engineering (column definitions, derived features)
+- **model/** - Modal functions (train, predict, status) + client + image
+- **predict/** - Prediction runner, 展開予想 formatter, ROI evaluator
 
-- **api/** - FastAPI route handlers (races, horses, entries, predictions, fetch, model, jockeys)
-- **services/** - Business logic layer (race_service, prediction_service, feature_service, simulation_service)
-- **repositories/** - Data access layer with base repository pattern
-- **models/** - SQLAlchemy ORM models (race, horse, jockey, entry, result, prediction)
-- **schemas/** - Pydantic validation schemas
-- **ml/** - Local ML utilities (pace.py for pace prediction rules)
-- **fetchers/** - External data scrapers (netkeiba.py with base class)
+### Config (`config/`)
 
-### Modal App Structure (`backend/modal_app/`)
+- **settings.py** - Pydantic BaseSettings (JRDB auth, paths, Modal config)
 
-Self-contained Modal functions (no external imports from app/):
+### CLI (`cli.py`)
 
-- **functions.py** - All Modal functions (train, predict, status, feature importance)
-- **features.py** - Feature engineering logic (shared with Modal functions)
-- **image.py** - Modal container image definition (Python 3.12 + AutoGluon)
-- **client.py** - ModalClient class for calling Modal functions from FastAPI
+Click-based CLI with commands: download, parse, train, predict, evaluate
 
-### Frontend Structure (`frontend/src/`)
+## Data Security
 
-- **pages/** - Route components (Dashboard, RaceList, RaceDetail, DataInput, ModelStatus)
-- **components/** - Reusable UI components organized by domain (common, race, prediction, charts, simulation)
-- **hooks/** - React Query hooks for API data fetching
-- **api/** - Axios client and API functions
-- **types/** - TypeScript interfaces
+**CRITICAL**: The following must NEVER be committed to git:
+- `data/` directory (JRDB raw/processed files)
+- `*.csv`, `*.lzh`, `*.zip` files
+- `.env` file (JRDB credentials)
+- `models/` directory
 
-### API Endpoints
+Always verify `.gitignore` before committing. JRDB credentials go in `.env` only.
 
-All APIs are prefixed with `/api`:
-- `/races` - Race CRUD
-- `/horses` - Horse information
-- `/jockeys` - Jockey statistics
-- `/entries` - Race entries (出走馬)
-- `/predictions` - ML predictions (uses Modal)
-- `/fetch` - External data scraping triggers
-- `/model` - ML model training and status (uses Modal)
-  - `GET /model/status` - Check if model is trained
-  - `POST /model/train` - Start training (async)
-  - `GET /model/training-status/{call_id}` - Check training progress
-  - `GET /model/feature-importance` - Get feature importance
+## Parser Design
 
-### Database
+JRDB uses CP932-encoded fixed-length records:
+- **KYI** (競走馬データ): 1024 bytes/record - horse data, JRDB indices, forecast
+- **SED** (成績データ): 376 bytes/record - race results, actual times/indices
+- **HJC** (払戻データ): 444 bytes/record - payoff data with repeating structures
 
-SQLite with SQLAlchemy async support. Data stored in `backend/data/boonta.db`. ML models are stored on Modal Volume (not locally).
+Field specs use 1-based byte offsets (matching JRDB docs). Parser converts to 0-based.
 
-### Key Concepts
+Race key structure: `場コード(2) + 年(2) + 回(1) + 日(1,hex) + R(2)` = 8 chars
 
-- **Running Styles (脚質)**: ESCAPE(逃げ), FRONT(先行), STALKER(差し), CLOSER(追込), VERSATILE(自在)
-- **Pace Prediction**: Rule-based logic determining race pace (high/middle/slow) based on running style distribution
-- **Bet Recommendations**: Focus on trifecta/trio/exacta with dark horse detection for value betting
-- **Modal Volume**: Persistent storage for trained ML models on Modal.com
+Reference docs:
+- `kyi_doc_utf8.txt` - KYI field specification
+- `sed_doc_utf8.txt` - SED field specification
+- `hjcdata_doc_utf8.txt` - HJC field specification
+
+## Feature Engineering
+
+6 categories, ~35 features total:
+
+1. **展開コア** (KYI): pace_forecast, mid/late3f/goal position/gap/io, tenkai_symbol
+2. **スピード指標** (KYI/SED): ten/pace/agari/position index, IDM
+3. **馬・厩舎・騎手指数** (KYI): jockey/info/overall/training/stable index
+4. **適性・リスク** (KYI): running_style, distance_aptitude, heavy_track, start/gate_miss, upset
+5. **レース条件**: horse_number, waku, odds, popularity, weight_carried
+6. **派生フィーチャー**: speed_balance, position_delta, io_shift, log_odds, risk_score
+
+**Design rule**: Training features use only KYI-derived data (available at prediction time). SED provides labels (is_place = 着順 <= 3) and anomaly filters only.
+
+## Modal Integration
+
+Self-contained functions in `src/model/functions.py` (no imports from `src/`):
+
+| Function | Purpose | Resources |
+|----------|---------|-----------|
+| `train_model()` | AutoGluon training | 8GB, CPU 4.0, 7200s timeout |
+| `predict()` | is_place probability | 4GB, 60s timeout |
+| `get_model_status()` | Model state check | 30s timeout |
+| `get_feature_importance()` | Feature importance | 4GB, 60s timeout |
+
+- App name: `boonta-ml`, Volume: `boonta-models`, Model: `jrdb_predictor`
+- Image: debian_slim + Python 3.12 + AutoGluon 1.5.1
+- Client (`src/model/client.py`): Synchronous (CLI-based, not async)
+- Preprocessing logic is defined inline in functions.py
 
 ## Testing
 
-### Running Tests
-
-```bash
-cd backend
-pytest                              # Run all tests
-pytest tests/unit/ -v               # Unit tests only
-pytest -k "test_pace" -v            # Run specific test pattern
-pytest --cov=app --cov-report=html  # With coverage report
-```
-
-### Test Structure
-
 ```
 tests/
-├── conftest.py              # Shared fixtures (db_session, test_race, etc.)
-├── fixtures/
-│   └── factories.py         # Test data factories
-├── unit/
-│   ├── ml/
-│   │   └── test_pace.py     # Pace prediction tests (~45 tests)
-│   ├── services/
-│   │   ├── test_prediction_service.py  # Prediction logic (~39 tests)
-│   │   └── test_feature_service.py     # Feature engineering (~14 tests)
-│   └── repositories/
-│       ├── test_base_repository.py     # CRUD operations (~10 tests)
-│       └── test_race_repository.py     # Race queries (~10 tests)
-└── integration/
-    └── api/                 # API endpoint tests (future)
+├── conftest.py
+├── fixtures/           # Binary JRDB record samples (.bin)
+├── test_parser/        # Parser engine + KYI/SED/HJC field tests
+├── test_features/      # Feature engineering tests
+├── test_model/         # Modal preprocessing tests (AutoGluon mocked)
+└── test_predict/       # Prediction runner + 展開予想 + ROI tests
 ```
 
-### Key Test Patterns
+- Test fixtures use binary `.bin` files (spec-compliant dummy records), NOT CSV
+- Modal/AutoGluon mocked in tests
+- No real JRDB data needed for tests
 
-- Use `pytest-asyncio` for async tests (asyncio_mode = "auto")
-- In-memory SQLite (`sqlite+aiosqlite:///:memory:`)
-- Modal client is mocked in tests (returns None for predictions)
-- Transaction rollback after each test
-
-### CI/CD
-
-GitHub Actions workflows (triggered on push/PR to main):
-
-**lint.yml**
-- Lint (ruff) - strict, blocks merge
-- Type check (mypy) - runs but doesn't block (continue-on-error)
-
-**test.yml**
-- pytest with coverage
-- Python 3.10, 3.11 matrix
-- Modal/AutoGluon excluded (mocked in tests)
-
-## Code Patterns
-
-### Repository Pattern
-
-Repositories extend `BaseRepository[ModelType]`:
-- `get(id)`, `get_all(skip, limit, filters)`, `count()`
-- `create(data)`, `update(id, data)`, `delete(id)`
-- Custom queries in subclasses (e.g., `get_with_entries()`)
-
-### Service Pattern
-
-Services encapsulate business logic:
-- Accept `AsyncSession` in constructor
-- Instantiate repositories internally
-- Return Pydantic schemas or domain objects
-
-### Modal Integration
-
-- `get_modal_client()` returns singleton ModalClient
-- ModalClient uses `modal.Function.from_name()` to get remote functions
-- Prediction service calls Modal for ML predictions asynchronously
-- Training is spawned async with `train_fn.spawn()` returning a call_id
-
-### Feature Engineering
-
-Feature engineering code exists in two places (must stay in sync):
-- `backend/app/ml/features.py` - For local utilities
-- `backend/modal_app/features.py` - Used by Modal functions for training/prediction
-
-When updating features, update both locations.
-
-### Netkeiba Scraping
-
-- Running styles are fetched via AJAX (`/horse/ajax_horse_results.html`) not by loading the full horse page
-- The race results table class is `db_h_race_results`, corner positions ("通過") are at column index **25**
-- netkeiba may change HTML structure — if running styles all return VERSATILE, check column indices
-- Horse IDs are extracted from the shutuba page via Selenium, but past results use httpx + AJAX for speed
-
-### Linting Configuration
+## Code Style
 
 - **ruff**: line-length 100, target Python 3.10
 - **mypy**: Python 3.10, strict return type warnings
+- **preset**: AutoGluon `best_quality` only. `extreme` is FORBIDDEN
 
-### Related Design Documents
+## Related Documents
 
-- `design.md` - Detailed system design specification
-- `FRONTEND_HANDOVER.md` - Frontend implementation guide with API specs and component patterns
-
-## Training Data
-
-### Location
-
-Training data is stored at `backend/data/training/g1_races.csv`
-
-### Required Columns
-
-| Category | Columns |
-|----------|---------|
-| Basic | `horse_number`, `post_position`, `odds`, `popularity`, `weight` |
-| Horse | `horse_age`, `horse_sex`, `horse_weight`, `horse_weight_diff` |
-| Race | `distance`, `course_type`, `venue`, `track_condition`, `weather` |
-| Style | `running_style` |
-| Stats | `win_rate`, `place_rate`, `avg_position_last5`, `avg_last_3f`, `best_last_3f` |
-| Jockey | `jockey_win_rate`, `jockey_venue_win_rate` |
-| Target | `is_place` (1=placed, 0=not placed) |
-
-### Collecting Training Data
-
-```bash
-cd backend
-
-# 1. Fetch race IDs for new years from netkeiba
-python scripts/fetch_grade_race_ids.py --grade G1 --years 2025 2026 --output data/g1_race_ids_new.json
-
-# 2. Add fetched IDs to KNOWN_G1_RACE_IDS in scripts/collect_training_data.py
-
-# 3. Run collection (30-60 min, scraping netkeiba)
-python scripts/collect_training_data.py --grade G1 --with-history
-
-# 4. Copy hist file to main training file (--with-history outputs to g1_races_hist.csv)
-cat data/training/g1_races_hist.csv >| data/training/g1_races.csv
-```
-
-### Training Model
-
-```bash
-# Via API (recommended for production, uses best_quality preset)
-curl -X POST http://localhost:8000/api/model/train \
-  -H "Content-Type: application/json" \
-  -d '{"time_limit": 1800}'
-
-# Check training progress
-curl http://localhost:8000/api/model/training-status/{call_id}
-
-# Via Modal CLI (test only, 5 min limit)
-modal run modal_app/functions.py::test_train
-```
-
-### Race Prediction Workflow
-
-```bash
-# 1. Register race from netkeiba
-curl -X POST http://localhost:8000/api/fetch/register \
-  -H "Content-Type: application/json" \
-  -d '{"netkeiba_race_id": "YYYYVVKKDDNN", "fetch_odds": true}'
-
-# 2. Fetch running styles (uses AJAX endpoint, not Selenium page load)
-curl -X POST http://localhost:8000/api/fetch/running-styles/{db_race_id} \
-  -H "Content-Type: application/json" \
-  -d '{"netkeiba_race_id": "YYYYVVKKDDNN"}'
-
-# 3. Run prediction
-curl -X POST http://localhost:8000/api/predictions/{db_race_id}
-```
-
-## Claude Code Skills
-
-Custom slash commands for common workflows:
-
-- `/predict-race [netkeiba_race_id]` — Register race + fetch running styles + run prediction
-- `/collect-training-data [year_start] [year_end]` — Fetch new G1 race data from netkeiba
-- `/train-model` — Deploy Modal app and start model training
+- `design2.md` - Full system design specification
+- `boonta_v2_requirements.md` - Requirements document
+- `kyi_doc_utf8.txt` - KYI (競走馬データ) field spec
+- `sed_doc_utf8.txt` - SED (成績データ) field spec
+- `hjcdata_doc_utf8.txt` - HJC (払戻データ) field spec
