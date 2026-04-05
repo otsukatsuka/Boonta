@@ -1,8 +1,6 @@
 """Boonta v2 CLI entry point."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import click
 import pandas as pd
 
@@ -48,9 +46,12 @@ def download(file_type: str, date_str: str | None, date_range: tuple[str, str] |
 def parse(file_type: str | None, date_str: str | None, parse_all: bool):
     """Parse raw JRDB files to CSV."""
     from src.parser import (
-        HJC_FIELDS, HJC_RECORD_LENGTH,
-        KYI_FIELDS, KYI_RECORD_LENGTH,
-        SED_FIELDS, SED_RECORD_LENGTH,
+        HJC_FIELDS,
+        HJC_RECORD_LENGTH,
+        KYI_FIELDS,
+        KYI_RECORD_LENGTH,
+        SED_FIELDS,
+        SED_RECORD_LENGTH,
     )
     from src.parser.engine import parse_file
 
@@ -155,8 +156,10 @@ def evaluate(date_range: tuple[str, str], strategy: str):
     from src.features.engineering import build_prediction_features
     from src.model.client import ModalClient
     from src.parser import (
-        HJC_FIELDS, HJC_RECORD_LENGTH,
-        KYI_FIELDS, KYI_RECORD_LENGTH,
+        HJC_FIELDS,
+        HJC_RECORD_LENGTH,
+        KYI_FIELDS,
+        KYI_RECORD_LENGTH,
     )
     from src.parser.engine import build_race_key, parse_file
     from src.predict.roi import evaluate_roi

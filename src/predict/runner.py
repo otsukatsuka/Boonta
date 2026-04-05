@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-
 from src.features.engineering import build_prediction_features
 from src.model.client import ModalClient
 from src.parser import KYI_FIELDS, KYI_RECORD_LENGTH
