@@ -98,11 +98,18 @@ def train(date_range: tuple[str, str], time_limit: int):
 
     click.echo(f"Building training features from {date_range[0]} to {date_range[1]}...")
 
-    # Parse all KYI and SED files in the date range
+    # Parse KYI and SED files in the date range
     kyi_frames, sed_frames = [], []
-    for path in sorted(settings.data_raw_dir.glob("KYI*.txt")):
+    kyi_paths = _filter_by_date_range(
+        sorted(settings.data_raw_dir.glob("KYI*.txt")), date_range,
+    )
+    sed_paths = _filter_by_date_range(
+        sorted(settings.data_raw_dir.glob("SED*.txt")), date_range,
+    )
+    click.echo(f"Found {len(kyi_paths)} KYI and {len(sed_paths)} SED files in range")
+    for path in kyi_paths:
         kyi_frames.append(parse_file(path, KYI_FIELDS, KYI_RECORD_LENGTH))
-    for path in sorted(settings.data_raw_dir.glob("SED*.txt")):
+    for path in sed_paths:
         sed_frames.append(parse_file(path, SED_FIELDS, SED_RECORD_LENGTH))
 
     if not kyi_frames or not sed_frames:
@@ -171,9 +178,12 @@ def evaluate(date_range: tuple[str, str], strategy: str):
 
     click.echo(f"Evaluating ROI ({strategy}) for {date_range[0]} to {date_range[1]}...")
 
-    # Parse KYI files
+    # Parse KYI files in date range
+    kyi_paths = _filter_by_date_range(
+        sorted(settings.data_raw_dir.glob("KYI*.txt")), date_range,
+    )
     kyi_frames = []
-    for path in sorted(settings.data_raw_dir.glob("KYI*.txt")):
+    for path in kyi_paths:
         kyi_frames.append(parse_file(path, KYI_FIELDS, KYI_RECORD_LENGTH))
 
     if not kyi_frames:
@@ -208,9 +218,12 @@ def evaluate(date_range: tuple[str, str], strategy: str):
 
     predictions_df = pd.concat(all_predictions, ignore_index=True)
 
-    # Parse HJC files
+    # Parse HJC files in date range
+    hjc_paths = _filter_by_date_range(
+        sorted(settings.data_raw_dir.glob("HJC*.txt")), date_range,
+    )
     hjc_frames = []
-    for path in sorted(settings.data_raw_dir.glob("HJC*.txt")):
+    for path in hjc_paths:
         df = parse_file(path, HJC_FIELDS, HJC_RECORD_LENGTH)
         df["race_key"] = df.apply(lambda row: build_race_key(row.to_dict()), axis=1)
         hjc_frames.append(df)
@@ -232,6 +245,26 @@ def evaluate(date_range: tuple[str, str], strategy: str):
     click.echo(f"回収率: {result['roi']}%")
     click.echo(f"的中数: {result['hit_count']}")
     click.echo(f"{'=' * 40}")
+
+
+def _filter_by_date_range(paths: list, date_range: tuple[str, str]) -> list:
+    """Filter file paths by YYYYMMDD date range. Filenames use YYMMDD."""
+    from datetime import datetime
+
+    start = datetime.strptime(date_range[0], "%Y%m%d")
+    end = datetime.strptime(date_range[1], "%Y%m%d")
+    filtered = []
+    for p in paths:
+        date_part = p.stem[3:]  # "KYI200105" → "200105"
+        if len(date_part) != 6 or not date_part.isdigit():
+            continue
+        try:
+            file_date = datetime.strptime(date_part, "%y%m%d")
+            if start <= file_date <= end:
+                filtered.append(p)
+        except ValueError:
+            continue
+    return filtered
 
 
 def _generate_dates(start: str, end: str) -> list[str]:
