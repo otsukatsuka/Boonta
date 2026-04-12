@@ -200,7 +200,7 @@ def evaluate(date_range: tuple[str, str], strategy: str):
 
     for race_key, race_df in features_df.groupby("race_key"):
         feature_cols = [c for c in race_df.columns
-                       if c not in ("race_key", "horse_number", "horse_name")]
+                       if c not in ("race_key", "horse_name")]
         features_list = race_df[feature_cols].to_dict("records")
 
         try:
