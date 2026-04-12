@@ -2,10 +2,10 @@
 import modal
 
 autogluon_image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.debian_slim(python_version="3.11")
     .apt_install("libgomp1")
     .pip_install(
-        "autogluon.tabular[all]==1.5.1",
+        "autogluon.tabular[all]==1.4.0",
         "pandas>=2.0.0",
         "numpy>=1.24.0",
     )

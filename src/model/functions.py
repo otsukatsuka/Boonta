@@ -19,10 +19,10 @@ import pandas as pd
 app = modal.App("boonta-ml")
 
 autogluon_image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.debian_slim(python_version="3.11")
     .apt_install("libgomp1")
     .pip_install(
-        "autogluon.tabular[all]==1.5.1",
+        "autogluon.tabular[all]==1.4.0",
         "pandas>=2.0.0",
         "numpy>=1.24.0",
     )
@@ -194,7 +194,9 @@ def predict(
 
     try:
         model_path = os.path.join(VOLUME_PATH, model_name)
-        predictor = TabularPredictor.load(model_path)
+        predictor = TabularPredictor.load(
+            model_path, require_py_version_match=False,
+        )
 
         features = json.loads(features_json)
         df = pd.DataFrame(features)
@@ -256,7 +258,9 @@ def get_feature_importance(model_name: str = "jrdb_predictor") -> dict:
 
     try:
         model_path = os.path.join(VOLUME_PATH, model_name)
-        predictor = TabularPredictor.load(model_path)
+        predictor = TabularPredictor.load(
+            model_path, require_py_version_match=False,
+        )
         importance_df = predictor.feature_importance()
 
         features = []
