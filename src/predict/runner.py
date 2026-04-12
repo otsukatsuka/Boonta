@@ -47,7 +47,7 @@ def run_prediction(
         predictions = None
         if client is not None:
             feature_cols = [c for c in race_df.columns
-                           if c not in ("race_key", "horse_number", "horse_name")]
+                           if c not in ("race_key", "horse_name")]
             features_list = race_df[feature_cols].to_dict("records")
 
             try:
