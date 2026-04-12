@@ -136,7 +136,7 @@ Self-contained functions in `src/model/functions.py` (no imports from `src/`):
 | `get_feature_importance()` | Feature importance | 4GB, 60s timeout |
 
 - App name: `boonta-ml`, Volume: `boonta-models`, Model: `jrdb_predictor`
-- Image: debian_slim + Python 3.12 + AutoGluon 1.5.1
+- Image: debian_slim + Python 3.11 + AutoGluon 1.4.0
 - Client (`src/model/client.py`): Synchronous (CLI-based, not async)
 - Preprocessing logic is defined inline in functions.py
 
