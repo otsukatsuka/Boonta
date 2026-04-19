@@ -102,3 +102,20 @@ class TestFormatTenkai:
         output = format_tenkai(df)
 
         assert "穴馬注意" not in output
+
+    def test_bets_section_with_predictions(self):
+        df = _make_race_df()
+        df["fukusho_odds"] = [1.5, 2.0, 1.4, 8.0]
+        predictions = [0.78, 0.65, 0.58, 0.25]
+        output = format_tenkai(df, predictions)
+
+        assert "期待値ランキング" in output
+        assert "買い目" in output
+
+    def test_no_bets_when_disabled(self):
+        df = _make_race_df()
+        predictions = [0.78, 0.65, 0.58, 0.25]
+        output = format_tenkai(df, predictions, show_bets=False)
+
+        assert "期待値ランキング" not in output
+        assert "買い目" not in output

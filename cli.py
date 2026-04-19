@@ -139,7 +139,13 @@ def train(date_range: tuple[str, str], time_limit: int):
 @click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
 @click.option("--race", "race_number", type=int, help="Specific race number")
 @click.option("--no-ml", is_flag=True, help="Skip ML predictions (show forecast only)")
-def predict(date_str: str, race_number: int | None, no_ml: bool):
+@click.option("--no-bet", is_flag=True, help="Skip EV ranking and bet recommendations")
+@click.option("--ev-threshold", type=float, default=1.0,
+              help="Minimum EV for tansho/fukusho picks (default 1.0 = break-even)")
+def predict(
+    date_str: str, race_number: int | None, no_ml: bool,
+    no_bet: bool, ev_threshold: float,
+):
     """Run predictions and show 展開予想."""
     from src.model.client import ModalClient
     from src.predict.runner import run_prediction
@@ -153,7 +159,13 @@ def predict(date_str: str, race_number: int | None, no_ml: bool):
 
     client = None if no_ml else ModalClient()
 
-    output = run_prediction(kyi_path, client=client, race_number=race_number)
+    output = run_prediction(
+        kyi_path,
+        client=client,
+        race_number=race_number,
+        show_bets=not no_bet,
+        ev_threshold=ev_threshold,
+    )
     click.echo(output)
 
 
