@@ -14,6 +14,8 @@ def run_prediction(
     kyi_path: Path,
     client: ModalClient | None = None,
     race_number: int | None = None,
+    show_bets: bool = True,
+    ev_threshold: float = 1.0,
 ) -> str:
     """Run full prediction pipeline for a KYI file.
 
@@ -21,6 +23,8 @@ def run_prediction(
         kyi_path: Path to raw KYI file.
         client: ModalClient instance. If None, predictions are skipped.
         race_number: Optional specific race number to predict.
+        show_bets: If True, append EV ranking and bet recommendations.
+        ev_threshold: Minimum expected value for tansho/fukusho inclusion.
 
     Returns:
         Formatted 展開予想 text output.
@@ -46,8 +50,9 @@ def run_prediction(
         # Get ML predictions if client available
         predictions = None
         if client is not None:
+            # Meta columns are for display only — exclude from model input
             feature_cols = [c for c in race_df.columns
-                           if c not in ("race_key", "horse_name")]
+                           if c not in ("race_key", "horse_name", "fukusho_odds")]
             features_list = race_df[feature_cols].to_dict("records")
 
             try:
@@ -57,7 +62,9 @@ def run_prediction(
             except Exception as e:
                 print(f"Prediction failed for {race_key}: {e}")
 
-        output = format_tenkai(race_df, predictions)
+        output = format_tenkai(
+            race_df, predictions, show_bets=show_bets, ev_threshold=ev_threshold,
+        )
         outputs.append(output)
 
     return "\n\n".join(outputs) if outputs else "No races found."

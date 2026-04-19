@@ -146,6 +146,9 @@ def build_prediction_features(kyi_df: pd.DataFrame) -> pd.DataFrame:
     if "馬名" in kyi_df.columns:
         kyi["horse_name"] = kyi_df["馬名"]
         meta_cols.append("horse_name")
+    if "基準複勝オッズ" in kyi_df.columns:
+        kyi["fukusho_odds"] = pd.to_numeric(kyi_df["基準複勝オッズ"], errors="coerce")
+        meta_cols.append("fukusho_odds")
 
     available = [c for c in FEATURE_COLUMNS if c in kyi.columns]
     keep_meta = [c for c in meta_cols if c in kyi.columns]
