@@ -15,6 +15,7 @@ FILE_TYPES = {
     "KYI": ("Kyi/", "zip", "KYI"),
     "SED": ("Sed/", "zip", "SED"),
     "HJC": ("Hjc/", "lzh", "HJC"),
+    "BAC": ("Bac/", "lzh", "BAC"),
 }
 
 
@@ -29,13 +30,16 @@ class JRDBDownloader:
         """Build download URL for a given file type and date.
 
         Args:
-            file_type: One of "KYI", "SED", "HJC".
+            file_type: One of "KYI", "SED", "HJC", "BAC".
             date_str: Date in YYMMDD format (e.g. "260405").
             use_year_subdir: If True, use 20YY/ subdirectory (current JRDB layout).
-                If False, fall back to legacy flat layout.
+                If False, fall back to legacy flat layout. Ignored for BAC.
         """
         path_prefix, archive_fmt, file_prefix = FILE_TYPES[file_type]
         filename = f"{file_prefix}{date_str}.{archive_fmt}"
+        if file_type == "BAC":
+            # BAC lives under /member/data/Bac/ (https, no year subdir)
+            return f"https://jrdb.com/member/data/{path_prefix}{filename}"
         if use_year_subdir:
             full_year = f"20{date_str[:2]}"
             return f"{self.settings.jrdb_base_url}{path_prefix}{full_year}/{filename}"

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=1400"/>
+<title>Boonta Web · CLASSIC TERMINAL</title>
+<link rel="stylesheet" href="styles.css"/>
+<style>
+  html, body { background: oklch(0.08 0.005 240); }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+
+function CanvasRoot() {
+  return (
+    <DesignCanvas
+      title="BOONTA · CLASSIC TERMINAL"
+      subtitle="JRDB 競馬予測 AI を Bloomberg 端末風に焼き直した Web 画面。3 screens — Dashboard / Race Detail / Backtest"
+    >
+      <DCSection id="screens" title="MAIN SCREENS">
+        <DCArtboard id="A-dash" label="① Dashboard — 日付指定→全レース一覧 + EVシグナル" width={1400} height={820}>
+          <div id="root-a-dash" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="A-race" label="② Race Detail — 展開予想・位置取り図・ML確率・EV散布・買い目" width={1400} height={820}>
+          <div id="root-a-race" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="A-back" label="③ Backtest — 戦略マトリクス × ROI × Equity Curve × 閾値感度" width={1400} height={820}>
+          <div id="root-a-back" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="prototype" title="LIVE PROTOTYPE  (タブ切替・Tweaksパネル・画面遷移が動く版)">
+        <DCArtboard id="A-proto" label="フル機能 — DASH ↔ RACE ↔ BACKTEST + EV閾値 Tweak" width={1400} height={840}>
+          <div id="root-a-proto" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CanvasRoot/>);
+
+// Mount each artboard once it appears
+function mountWhenReady(id, render) {
+  const tick = () => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.mounted) {
+      el.dataset.mounted = "1";
+      ReactDOM.createRoot(el).render(render());
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+mountWhenReady("root-a-dash", () => <window.RaceTerminalApp initialTab="dash" showTweaks={false}/>);
+mountWhenReady("root-a-race", () => <window.RaceTerminalApp initialTab="race" showTweaks={false}/>);
+mountWhenReady("root-a-back", () => <window.RaceTerminalApp initialTab="back" showTweaks={false}/>);
+mountWhenReady("root-a-proto", () => <window.RaceTerminalApp initialTab="dash" showTweaks={true}/>);
+</script>
+</body>
+</html>

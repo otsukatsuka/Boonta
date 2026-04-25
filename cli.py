@@ -14,7 +14,264 @@ def cli():
 
 
 @cli.command()
-@click.option("--type", "file_type", required=True, type=click.Choice(["KYI", "SED", "HJC"]))
+@click.option("--port", default=8000, help="API port")
+@click.option("--host", default="127.0.0.1", help="API host")
+@click.option("--no-vite", is_flag=True, help="Skip starting the vite dev server")
+@click.option("--reload/--no-reload", default=True, help="uvicorn --reload")
+def serve(port: int, host: str, no_vite: bool, reload: bool):
+    """Start API server (and the vite dev server unless --no-vite)."""
+    import shutil
+    import subprocess
+    import signal
+    import sys
+
+    settings = Settings()
+    web_dir = settings.project_root / "web"
+
+    procs: list[subprocess.Popen] = []
+
+    api_cmd = [
+        "uvicorn", "src.api.main:app",
+        "--host", host, "--port", str(port),
+    ]
+    if reload:
+        api_cmd.append("--reload")
+    click.echo(f"→ uvicorn http://{host}:{port}")
+    procs.append(subprocess.Popen(api_cmd, cwd=settings.project_root))
+
+    if not no_vite:
+        if not web_dir.exists():
+            click.echo(f"web/ not found at {web_dir}; run pnpm install there", err=True)
+        else:
+            pnpm = shutil.which("pnpm")
+            if pnpm is None:
+                click.echo("pnpm not found in PATH; skipping vite", err=True)
+            else:
+                click.echo("→ vite http://localhost:5173")
+                procs.append(subprocess.Popen([pnpm, "dev"], cwd=web_dir))
+
+    def _shutdown(*_):
+        click.echo("\nshutting down...")
+        for p in procs:
+            try:
+                p.send_signal(signal.SIGINT)
+            except Exception:
+                pass
+        for p in procs:
+            try:
+                p.wait(timeout=5)
+            except Exception:
+                p.kill()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # wait
+    for p in procs:
+        p.wait()
+
+
+@cli.group()
+def db():
+    """Database management (init / ingest)."""
+    pass
+
+
+@cli.group()
+def backtest():
+    """Backtest strategies against stored predictions + payouts."""
+    pass
+
+
+@backtest.command("run")
+@click.option("--strategy", default="all",
+              help="Strategy id (or 'all' for all 6)")
+@click.option("--date-range", "date_range", nargs=2, required=True,
+              help="YYYYMMDD YYYYMMDD")
+@click.option("--ev-threshold", type=float, default=1.0,
+              help="EV threshold for ev_* strategies (ignored otherwise)")
+@click.option("--no-sensitivity", is_flag=True,
+              help="Skip ev_threshold sensitivity sweep")
+def backtest_run(
+    strategy: str,
+    date_range: tuple[str, str],
+    ev_threshold: float,
+    no_sensitivity: bool,
+):
+    """Run backtest(s) and persist results to DB."""
+    from datetime import datetime as _dt
+    from src.backtest import (
+        STRATEGIES,
+        load_hjc_df,
+        load_predictions_df,
+        latest_model_version,
+        run_backtest,
+        run_sensitivity_sweep,
+    )
+    from src.backtest.runner import EV_STRATEGIES
+    from src.db.session import session_scope
+
+    date_from = _dt.strptime(date_range[0], "%Y%m%d").date()
+    date_to = _dt.strptime(date_range[1], "%Y%m%d").date()
+    targets = STRATEGIES if strategy == "all" else [strategy]
+    for s in targets:
+        if s not in STRATEGIES:
+            click.echo(f"Unknown strategy: {s}", err=True)
+            raise click.exceptions.Exit(1)
+
+    with session_scope() as session:
+        mv = latest_model_version(session)
+        if mv is None:
+            click.echo("No predictions in DB. Run predict first.", err=True)
+            raise click.exceptions.Exit(1)
+        click.echo(f"model_version={mv}, range={date_from}..{date_to}")
+
+        preds_df = load_predictions_df(session, date_from, date_to, mv)
+        hjc_df = load_hjc_df(session, date_from, date_to)
+        if preds_df.empty or hjc_df.empty:
+            click.echo("No predictions or payouts in date range", err=True)
+            raise click.exceptions.Exit(1)
+
+        for s in targets:
+            try:
+                run = run_backtest(
+                    session,
+                    strategy=s,
+                    date_from=date_from,
+                    date_to=date_to,
+                    ev_threshold=ev_threshold,
+                    model_version=mv,
+                )
+                click.echo(
+                    f"  {s:<24} ROI={run.roi:>6.1f}%  "
+                    f"hits={run.hits:>5}  bets={run.invested:>10,}  ret={run.returned:>10,}"
+                )
+                if not no_sensitivity and s in EV_STRATEGIES:
+                    n = run_sensitivity_sweep(
+                        session, run=run, preds_df=preds_df, hjc_df=hjc_df,
+                    )
+                    click.echo(f"    sensitivity sweep: {n} thresholds")
+            except Exception as e:
+                click.echo(f"  {s} failed: {e}", err=True)
+
+
+@db.command("init")
+def db_init():
+    """Apply Alembic migrations and ensure WAL mode."""
+    import subprocess
+    import sys
+
+    settings = Settings()
+    alembic_ini = settings.project_root / "alembic.ini"
+    # Use the same Python that's running cli.py — avoids PATH issues when the
+    # user hasn't activated the venv but invokes via .venv/bin/python.
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", str(alembic_ini), "upgrade", "head"],
+        cwd=settings.project_root,
+        capture_output=True,
+        text=True,
+    )
+    click.echo(result.stdout)
+    if result.returncode != 0:
+        click.echo(result.stderr, err=True)
+        raise click.exceptions.Exit(1)
+
+    from src.db.session import db_path
+    click.echo(f"DB ready: {db_path(settings)}")
+
+
+@db.command("ingest")
+@click.option("--type", "file_type", required=True,
+              type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
+@click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
+def db_ingest(file_type: str, date_str: str):
+    """Ingest a single day's parsed JRDB file into the DB."""
+    from src.db.ingest import (
+        held_on_from_filename,
+        ingest_bac,
+        ingest_hjc,
+        ingest_kyi,
+        ingest_sed,
+    )
+    from src.db.session import session_scope
+    from src.parser import (
+        BAC_FIELDS,
+        BAC_RECORD_LENGTH,
+        HJC_FIELDS,
+        HJC_RECORD_LENGTH,
+        KYI_FIELDS,
+        KYI_RECORD_LENGTH,
+        SED_FIELDS,
+        SED_RECORD_LENGTH,
+    )
+    from src.parser.engine import parse_file
+
+    settings = Settings()
+    spec = {
+        "KYI": (KYI_FIELDS, KYI_RECORD_LENGTH, ingest_kyi),
+        "SED": (SED_FIELDS, SED_RECORD_LENGTH, ingest_sed),
+        "HJC": (HJC_FIELDS, HJC_RECORD_LENGTH, ingest_hjc),
+        "BAC": (BAC_FIELDS, BAC_RECORD_LENGTH, ingest_bac),
+    }
+    fields, rec_len, ingest_fn = spec[file_type]
+    path = settings.data_raw_dir / f"{file_type}{date_str}.txt"
+    if not path.exists():
+        click.echo(f"File not found: {path}", err=True)
+        raise click.exceptions.Exit(1)
+
+    held_on = held_on_from_filename(path)
+    df = parse_file(path, fields, rec_len)
+    with session_scope() as session:
+        touched = ingest_fn(session, df, held_on)
+    click.echo(f"{file_type} {date_str} ({held_on}): {len(df)} records → {touched} races")
+
+
+@db.command("ingest-all")
+@click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
+def db_ingest_all(date_str: str):
+    """Ingest BAC + KYI + SED + HJC for a single day (in order, missing ones skipped)."""
+    from src.db.ingest import (
+        held_on_from_filename,
+        ingest_bac,
+        ingest_hjc,
+        ingest_kyi,
+        ingest_sed,
+    )
+    from src.db.session import session_scope
+    from src.parser import (
+        BAC_FIELDS,
+        BAC_RECORD_LENGTH,
+        HJC_FIELDS,
+        HJC_RECORD_LENGTH,
+        KYI_FIELDS,
+        KYI_RECORD_LENGTH,
+        SED_FIELDS,
+        SED_RECORD_LENGTH,
+    )
+    from src.parser.engine import parse_file
+
+    settings = Settings()
+    pipeline = [
+        ("BAC", BAC_FIELDS, BAC_RECORD_LENGTH, ingest_bac),
+        ("KYI", KYI_FIELDS, KYI_RECORD_LENGTH, ingest_kyi),
+        ("SED", SED_FIELDS, SED_RECORD_LENGTH, ingest_sed),
+        ("HJC", HJC_FIELDS, HJC_RECORD_LENGTH, ingest_hjc),
+    ]
+    with session_scope() as session:
+        for ft, fields, rec_len, ingest_fn in pipeline:
+            path = settings.data_raw_dir / f"{ft}{date_str}.txt"
+            if not path.exists():
+                click.echo(f"  skip {ft}: not found")
+                continue
+            held_on = held_on_from_filename(path)
+            df = parse_file(path, fields, rec_len)
+            touched = ingest_fn(session, df, held_on)
+            click.echo(f"  {ft}: {len(df)} rec → {touched} races (held_on={held_on})")
+
+
+@cli.command()
+@click.option("--type", "file_type", required=True, type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
 @click.option("--date", "date_str", help="Date in YYMMDD format (e.g. 260405)")
 @click.option(
     "--date-range", "date_range", nargs=2,
@@ -43,12 +300,14 @@ def download(file_type: str, date_str: str | None, date_range: tuple[str, str] |
 
 
 @cli.command()
-@click.option("--type", "file_type", type=click.Choice(["KYI", "SED", "HJC"]))
+@click.option("--type", "file_type", type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
 @click.option("--date", "date_str", help="Date in YYMMDD format")
 @click.option("--all", "parse_all", is_flag=True, help="Parse all files in data/raw/")
 def parse(file_type: str | None, date_str: str | None, parse_all: bool):
     """Parse raw JRDB files to CSV."""
     from src.parser import (
+        BAC_FIELDS,
+        BAC_RECORD_LENGTH,
         HJC_FIELDS,
         HJC_RECORD_LENGTH,
         KYI_FIELDS,
@@ -65,6 +324,7 @@ def parse(file_type: str | None, date_str: str | None, parse_all: bool):
         "KYI": (KYI_FIELDS, KYI_RECORD_LENGTH, "KYI"),
         "SED": (SED_FIELDS, SED_RECORD_LENGTH, "SED"),
         "HJC": (HJC_FIELDS, HJC_RECORD_LENGTH, "HJC"),
+        "BAC": (BAC_FIELDS, BAC_RECORD_LENGTH, "BAC"),
     }
 
     if parse_all:

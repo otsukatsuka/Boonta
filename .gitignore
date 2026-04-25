@@ -30,6 +30,16 @@ __pycache__/
 dist/
 build/
 
+# Web (Vite/React)
+web/node_modules/
+web/dist/
+web/src/routeTree.gen.ts
+web/tsconfig.tsbuildinfo
+web/.vite/
+
+# Backtest scratch outputs (may contain prediction CSVs)
+out/
+
 # Coverage
 htmlcov/
 .coverage

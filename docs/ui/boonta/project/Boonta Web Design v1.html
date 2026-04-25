@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=1400"/>
+<title>Boonta Web · Design Exploration</title>
+<link rel="stylesheet" href="styles.css"/>
+<style>
+  html, body { background: oklch(0.08 0.005 240); }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+<script type="text/babel" src="app-neo.jsx"></script>
+<script type="text/babel" src="app-radar.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+
+function CanvasRoot() {
+  return (
+    <DesignCanvas
+      title="BOONTA · Web Design Exploration"
+      subtitle="JRDB 競馬予測 AI システム — トレーディング端末風 / 3 案 × 3 画面"
+    >
+      <DCSection id="intro" title="OVERVIEW">
+        <DCArtboard id="brief" label="Design Brief" width={1080} height={620}>
+          <div style={{padding:"40px 50px", height:"100%", boxSizing:"border-box", background:"oklch(0.1 0.005 240)", color:"oklch(0.96 0.005 240)", fontFamily:"'Inter Tight', sans-serif", display:"flex", flexDirection:"column", gap:18}}>
+            <div style={{display:"flex", alignItems:"baseline", gap:14}}>
+              <span style={{padding:"4px 12px", background:"oklch(0.78 0.16 75)", color:"#000", fontFamily:"'Space Grotesk', sans-serif", fontWeight:700, letterSpacing:"0.18em", fontSize:11}}>BOONTA · TERM</span>
+              <span style={{color:"oklch(0.78 0.13 215)", fontFamily:"'JetBrains Mono', monospace", fontSize:12}}>v2.04.25</span>
+            </div>
+            <h1 style={{fontFamily:"'Space Grotesk', sans-serif", fontSize:54, fontWeight:800, letterSpacing:"-0.02em", lineHeight:1.05, margin:0}}>
+              Bloomberg を競馬予想に<br/>転用したらこうなる、の試案。
+            </h1>
+            <p style={{maxWidth:780, fontSize:16, lineHeight:1.6, color:"oklch(0.78 0.008 240)"}}>
+              現状の <code style={{fontFamily:"'JetBrains Mono', monospace", color:"oklch(0.78 0.16 75)"}}>cli.py predict</code> / <code style={{fontFamily:"'JetBrains Mono', monospace", color:"oklch(0.78 0.16 75)"}}>evaluate</code> をそのままトレーダー端末に焼き直す方向。古き良き競馬サイトとは決別、データ密度MAX・等幅・夜間ダーク。
+              EV閾値ひとつで「BUY / WATCH / SKIP」がパッと判別できる、自分専用ダッシュボード。
+            </p>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:12, marginTop:8}}>
+              {[
+                ["3 SCREENS", "Dashboard · Race Detail · Backtest"],
+                ["3 VARIANTS", "Classic · Neo Trading · Radar"],
+                ["1 TWEAK", "EV threshold (0.80 → 1.50)"],
+              ].map(([k,v]) => (
+                <div key={k} style={{padding:"14px 16px", border:"1px solid oklch(0.32 0.01 240)", background:"oklch(0.18 0.006 240)"}}>
+                  <div style={{fontFamily:"'JetBrains Mono', monospace", fontSize:10, color:"oklch(0.58 0.01 240)", textTransform:"uppercase", letterSpacing:"0.1em"}}>{k}</div>
+                  <div style={{fontFamily:"'JetBrains Mono', monospace", fontSize:13, marginTop:4}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:"auto", fontFamily:"'JetBrains Mono', monospace", fontSize:11, color:"oklch(0.42 0.01 240)"}}>
+              データは KYI 由来の 35 特徴量 / Modal AutoGluon の <code>is_place</code> 確率をフロントから読む前提。<br/>
+              EV単 = is_place_prob ÷ 3 × 単勝オッズ、EV複 = is_place_prob × 複勝オッズ。
+            </div>
+          </div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="A" title="VARIANT A · CLASSIC TERMINAL  (緑+アンバーの古典端末色 / 行密度MAX / 罫線ベース)">
+        <DCArtboard id="A-dash" label="Dashboard — 日付指定→全レース一覧" width={1400} height={820}>
+          <div id="root-a-dash" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="A-race" label="Race Detail — 展開・ML・EV散布・買い目" width={1400} height={820}>
+          <div id="root-a-race" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="A-back" label="Backtest — 戦略×ROI / Equity Curve" width={1400} height={820}>
+          <div id="root-a-back" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="B" title="VARIANT B · NEO TRADING  (ティッカーテープ + ビッグナンバー + EVバーで一目)">
+        <DCArtboard id="B-dash" label="Dashboard — Tape + Stat strip + Race cards" width={1400} height={820}>
+          <div id="root-b-dash" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="C" title="VARIANT C · RADAR  (トラック俯瞰のレーダー風 / 大胆ビジュアル)">
+        <DCArtboard id="C-race" label="Race Detail — Track Radar + EV Gauge" width={1400} height={820}>
+          <div id="root-c-race" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CanvasRoot/>);
+
+// Mount each artboard once it appears
+function mountWhenReady(id, render) {
+  const tick = () => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.mounted) {
+      el.dataset.mounted = "1";
+      ReactDOM.createRoot(el).render(render());
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+mountWhenReady("root-a-dash", () => <window.RaceTerminalApp initialTab="dash" showTweaks={false}/>);
+mountWhenReady("root-a-race", () => <window.RaceTerminalApp initialTab="race" showTweaks={false}/>);
+mountWhenReady("root-a-back", () => <window.RaceTerminalApp initialTab="back" showTweaks={false}/>);
+mountWhenReady("root-b-dash", () => <window.RaceTerminalNeoApp/>);
+mountWhenReady("root-c-race", () => <window.RaceTerminalRadarApp/>);
+</script>
+</body>
+</html>
