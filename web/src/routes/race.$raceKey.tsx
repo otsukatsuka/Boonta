@@ -8,26 +8,26 @@ import { EVScatter } from "../components/EVScatter";
 import { CornerPositions } from "../components/CornerPositions";
 import { useEvThreshold } from "../components/TweaksPanel";
 import { usePredictRace, useRaceDetail } from "../hooks/useApi";
-import { withRecomputedEV, buildBetPlan } from "../lib/betting";
+import { withRecomputedEV, buildBetMarkers, type SingleBet } from "../lib/betting";
 import { IO_LABEL, STYLE_LABEL } from "../lib/format";
 import type { Horse } from "../api/types";
 
 function BetsCard({
-  plan,
+  markers,
   evThreshold,
 }: {
-  plan: ReturnType<typeof buildBetPlan>;
+  markers: ReturnType<typeof buildBetMarkers>;
   evThreshold: number;
 }) {
   const Row = ({
     label,
     code,
-    count,
+    meta,
     children,
   }: {
     label: string;
     code: string;
-    count: number;
+    meta: string;
     children: React.ReactNode;
   }) => (
     <div style={{ padding: "8px 0", borderBottom: "1px dashed var(--bg-3)" }}>
@@ -39,27 +39,29 @@ function BetsCard({
           </span>
         </span>
         <span className="dim tnum" style={{ fontSize: 10 }}>
-          {count}点
+          {meta}
         </span>
       </div>
       <div style={{ marginTop: 4, fontFamily: "var(--mono)" }}>{children}</div>
     </div>
   );
-  const nums = (arr: number[]) =>
+  const singleBets = (arr: SingleBet[]) =>
     arr.length ? (
-      arr.map((n) => (
+      arr.map((b) => (
         <span
-          key={n}
-          className="bold tnum"
+          key={b.horse_number}
+          className={"tnum " + (b.hot ? "amb bold" : "dim")}
           style={{
             display: "inline-block",
             padding: "1px 6px",
-            border: "1px solid var(--line)",
+            border: "1px solid " + (b.hot ? "var(--amber-dim)" : "var(--line)"),
             marginRight: 4,
             marginBottom: 4,
           }}
         >
-          {n}
+          <span className="bold">{b.horse_number}</span>{" "}
+          <span style={{ fontSize: 10 }}>{b.ev.toFixed(2)}</span>
+          {b.hot ? " ★" : ""}
         </span>
       ))
     ) : (
@@ -85,33 +87,37 @@ function BetsCard({
     ) : (
       <span className="dim">該当なし</span>
     );
+  const hotMeta = (arr: SingleBet[]) => {
+    const hot = arr.filter((b) => b.hot).length;
+    return arr.length ? `★${hot} / ${arr.length}` : "—";
+  };
   return (
     <div>
       <div className="dim" style={{ fontSize: 10, marginBottom: 4 }}>
-        ev_threshold={evThreshold.toFixed(2)}
+        ev_threshold={evThreshold.toFixed(2)} · ★ = 閾値超え
       </div>
-      <Row label="単勝" code="TANSHO" count={plan.tansho.length}>
-        {nums(plan.tansho)}
+      <Row label="単勝" code="TANSHO" meta={hotMeta(markers.tansho)}>
+        {singleBets(markers.tansho)}
       </Row>
-      <Row label="複勝" code="FUKUSHO" count={plan.fukusho.length}>
-        {nums(plan.fukusho)}
+      <Row label="複勝" code="FUKUSHO" meta={hotMeta(markers.fukusho)}>
+        {singleBets(markers.fukusho)}
       </Row>
-      <Row label="馬連 BOX" code="UMAREN · top3" count={plan.umaren_box.length}>
-        {combos(plan.umaren_box)}
+      <Row label="馬連 BOX" code="UMAREN · top3" meta={`${markers.umaren_box.length}点`}>
+        {combos(markers.umaren_box)}
       </Row>
       <Row
         label="3連複 BOX"
         code="SANRENPUKU · top4"
-        count={plan.sanrenpuku_box.length}
+        meta={`${markers.sanrenpuku_box.length}点`}
       >
-        {combos(plan.sanrenpuku_box)}
+        {combos(markers.sanrenpuku_box)}
       </Row>
       <Row
-        label={`3連複 軸1頭流し (軸 ${plan.nagashi.axis ?? "-"})`}
+        label={`3連複 軸1頭流し (軸 ${markers.nagashi.axis ?? "-"})`}
         code="NAGASHI"
-        count={plan.nagashi.combos.length}
+        meta={`${markers.nagashi.combos.length}点`}
       >
-        {combos(plan.nagashi.combos)}
+        {combos(markers.nagashi.combos)}
       </Row>
     </div>
   );
@@ -132,8 +138,8 @@ function RaceDetailScreen() {
     () => [...horses].sort((a, b) => (b.ev_tan ?? -1) - (a.ev_tan ?? -1)),
     [horses],
   );
-  const plan = useMemo(
-    () => buildBetPlan(horses, evThreshold),
+  const markers = useMemo(
+    () => buildBetMarkers(horses, evThreshold),
     [horses, evThreshold],
   );
 
@@ -338,7 +344,7 @@ function RaceDetailScreen() {
           title="買い目 (EV ベース)"
           meta={`ev_threshold=${evThreshold.toFixed(2)}`}
         >
-          <BetsCard plan={plan} evThreshold={evThreshold} />
+          <BetsCard markers={markers} evThreshold={evThreshold} />
         </Panel>
       </div>
     </div>

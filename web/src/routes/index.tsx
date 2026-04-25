@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { BetPicksCell } from "../components/BetPicksCell";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { Umaban } from "../components/Umaban";
@@ -17,6 +18,35 @@ function roiClass(roi: number): string {
   if (roi >= 90) return "amb";
   if (roi >= 70) return "";
   return "neg";
+}
+
+type SortField = "best_ev_tan" | "best_ev_fuku" | "post_time";
+type SortState = { field: SortField; dir: "asc" | "desc" } | null;
+
+function SortHeader({
+  field,
+  sort,
+  onToggle,
+  children,
+}: {
+  field: SortField;
+  sort: SortState;
+  onToggle: (f: SortField) => void;
+  children: React.ReactNode;
+}) {
+  const active = sort?.field === field;
+  const arrow = !active ? "↕" : sort.dir === "asc" ? "▲" : "▼";
+  const cls =
+    "sortable" +
+    (active ? (sort.dir === "asc" ? " sort-asc" : " sort-desc") : "");
+  return (
+    <th className={cls} onClick={() => onToggle(field)}>
+      {children}{" "}
+      <span className={active ? "" : "dim"} style={{ fontSize: 9 }}>
+        {arrow}
+      </span>
+    </th>
+  );
 }
 
 function StrategyKpiList({ strategies }: { strategies: Strategy[] }) {
@@ -130,7 +160,33 @@ function DashboardScreen() {
 
   const signals = races
     .filter((r) => r.best_ev_tan != null && r.best_ev_tan >= evThreshold)
-    .slice(0, 4);
+    .sort((a, b) => (b.best_ev_tan ?? 0) - (a.best_ev_tan ?? 0));
+
+  const [sort, setSort] = useState<SortState>(null);
+  const toggleSort = (field: SortField) => {
+    setSort((prev) => {
+      if (prev?.field !== field) {
+        return { field, dir: field === "post_time" ? "asc" : "desc" };
+      }
+      if (prev.dir === "desc") return { field, dir: "asc" };
+      return null;
+    });
+  };
+  const sortedRaces = useMemo(() => {
+    if (!sort) return races;
+    const { field, dir } = sort;
+    const sign = dir === "asc" ? 1 : -1;
+    return [...races].sort((a, b) => {
+      const av = a[field];
+      const bv = b[field];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (field === "post_time")
+        return sign * (av as string).localeCompare(bv as string);
+      return sign * ((av as number) - (bv as number));
+    });
+  }, [races, sort]);
 
   function openRace(race_key: string) {
     navigate({ to: "/race/$raceKey", params: { raceKey: race_key } });
@@ -205,15 +261,22 @@ function DashboardScreen() {
               <th>馬場</th>
               <th>ペース</th>
               <th>本命</th>
+              <th className="l">買い目</th>
               <th>P(複)</th>
-              <th>EV単</th>
-              <th>EV複</th>
-              <th>発走</th>
+              <SortHeader field="best_ev_tan" sort={sort} onToggle={toggleSort}>
+                EV単
+              </SortHeader>
+              <SortHeader field="best_ev_fuku" sort={sort} onToggle={toggleSort}>
+                EV複
+              </SortHeader>
+              <SortHeader field="post_time" sort={sort} onToggle={toggleSort}>
+                発走
+              </SortHeader>
               <th>SIG</th>
             </tr>
           </thead>
           <tbody>
-            {races.map((r) => {
+            {sortedRaces.map((r) => {
               const evGood = (r.best_ev_tan ?? 0) >= evThreshold;
               return (
                 <tr
@@ -268,6 +331,9 @@ function DashboardScreen() {
                       <span className="dim">未予測</span>
                     )}
                   </td>
+                  <td className="l">
+                    <BetPicksCell horses={r.horses} evThreshold={evThreshold} />
+                  </td>
                   <td className="amb tnum bold">
                     {r.ml_top ? (r.ml_top.prob * 100).toFixed(1) : "—"}
                   </td>
@@ -298,7 +364,7 @@ function DashboardScreen() {
             })}
             {races.length === 0 && !racesQ.isLoading && (
               <tr>
-                <td colSpan={12} style={{ padding: 24 }} className="dim">
+                <td colSpan={13} style={{ padding: 24 }} className="dim">
                   データなし。 <code>python cli.py db ingest-all --date YYMMDD</code> で取り込んでね。
                 </td>
               </tr>
@@ -316,7 +382,10 @@ function DashboardScreen() {
           minHeight: 0,
         }}
       >
-        <Panel title="EV シグナル" meta={`thr=${evThreshold.toFixed(2)}`}>
+        <Panel
+          title="EV シグナル"
+          meta={`${signals.length} hits · thr=${evThreshold.toFixed(2)}`}
+        >
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {signals.length === 0 && (
               <div className="dim">該当レースなし</div>

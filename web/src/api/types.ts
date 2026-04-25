@@ -9,27 +9,6 @@ export interface MlTop {
   prob: number;
 }
 
-export interface RaceListItem {
-  race_key: string;
-  held_on: string;        // ISO date YYYY-MM-DD
-  venue_code: string;
-  venue: string;
-  race_no: number;
-  name: string | null;
-  grade: string | null;
-  surface: string | null;
-  distance: number | null;
-  condition: string | null;
-  weather: string | null;
-  post_time: string | null;
-  head_count: number | null;
-  pace: string | null;    // "H" | "M" | "S"
-  best_ev_tan: number | null;
-  best_ev_fuku: number | null;
-  ml_top: MlTop | null;
-  status: "OPEN" | "DONE" | "NO_PREDICTION";
-}
-
 export interface Horse {
   horse_number: number;
   waku: number | null;
@@ -51,6 +30,28 @@ export interface Horse {
   prob: number | null;
   ev_tan: number | null;
   ev_fuku: number | null;
+}
+
+export interface RaceListItem {
+  race_key: string;
+  held_on: string;        // ISO date YYYY-MM-DD
+  venue_code: string;
+  venue: string;
+  race_no: number;
+  name: string | null;
+  grade: string | null;
+  surface: string | null;
+  distance: number | null;
+  condition: string | null;
+  weather: string | null;
+  post_time: string | null;
+  head_count: number | null;
+  pace: string | null;    // "H" | "M" | "S"
+  best_ev_tan: number | null;
+  best_ev_fuku: number | null;
+  ml_top: MlTop | null;
+  status: "OPEN" | "DONE" | "NO_PREDICTION";
+  horses: Horse[];
 }
 
 export interface RaceDetail {

@@ -45,6 +45,85 @@ function combinations<T>(arr: T[], k: number): T[][] {
   return out;
 }
 
+export interface SingleBet {
+  horse_number: number;
+  ev: number;
+  hot: boolean;
+}
+
+export interface BetMarkers {
+  tansho: SingleBet[];
+  fukusho: SingleBet[];
+  umaren_box: number[][];
+  sanrenpuku_box: number[][];
+  nagashi: NagashiPlan;
+}
+
+/**
+ * Build a fixed-size view of bet candidates that does NOT depend on the threshold
+ * for *visibility*. The threshold only marks "hot" picks via the `hot` flag and
+ * the ★ in the UI. Everything is sorted by EV desc and capped at the per-strategy
+ * limits below — so the panel always shows something as long as data is present.
+ */
+export function buildBetMarkers(
+  horses: Horse[],
+  evThreshold: number,
+  opts: {
+    topTan?: number;
+    topFuku?: number;
+    boxSize?: number;
+    trifectaBoxSize?: number;
+    maxPartners?: number;
+  } = {},
+): BetMarkers {
+  const topTan = opts.topTan ?? 5;
+  const topFuku = opts.topFuku ?? 5;
+  const boxSize = opts.boxSize ?? 3;
+  const trifectaBoxSize = opts.trifectaBoxSize ?? 4;
+  const maxPartners = opts.maxPartners ?? 5;
+
+  const sortedByEvTan = [...horses]
+    .filter((h) => h.ev_tan != null)
+    .sort((a, b) => b.ev_tan! - a.ev_tan!);
+  const sortedByEvFuku = [...horses]
+    .filter((h) => h.ev_fuku != null)
+    .sort((a, b) => b.ev_fuku! - a.ev_fuku!);
+
+  const tansho: SingleBet[] = sortedByEvTan.slice(0, topTan).map((h) => ({
+    horse_number: h.horse_number,
+    ev: h.ev_tan!,
+    hot: h.ev_tan! > evThreshold,
+  }));
+  const fukusho: SingleBet[] = sortedByEvFuku.slice(0, topFuku).map((h) => ({
+    horse_number: h.horse_number,
+    ev: h.ev_fuku!,
+    hot: h.ev_fuku! > evThreshold,
+  }));
+
+  const topBox = sortedByEvTan.slice(0, boxSize).map((h) => h.horse_number);
+  const umaren_box =
+    topBox.length >= 2 ? combinations([...topBox].sort((a, b) => a - b), 2) : [];
+
+  const topTri = sortedByEvTan.slice(0, trifectaBoxSize).map((h) => h.horse_number);
+  const sanrenpuku_box =
+    topTri.length >= 3 ? combinations([...topTri].sort((a, b) => a - b), 3) : [];
+
+  const nagashi: NagashiPlan = (() => {
+    if (sortedByEvFuku.length === 0) return { axis: null, partners: [], combos: [] };
+    const axis = sortedByEvFuku[0].horse_number;
+    const partners = sortedByEvTan
+      .filter((h) => h.horse_number !== axis)
+      .slice(0, maxPartners)
+      .map((h) => h.horse_number);
+    const combos = combinations(partners, 2).map((pair) =>
+      [axis, ...pair].sort((a, b) => a - b),
+    );
+    return { axis, partners, combos };
+  })();
+
+  return { tansho, fukusho, umaren_box, sanrenpuku_box, nagashi };
+}
+
 export function buildBetPlan(
   horses: Horse[],
   evThreshold: number,

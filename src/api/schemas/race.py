@@ -12,27 +12,6 @@ class MlTop(BaseModel):
     prob: float
 
 
-class RaceListItem(BaseModel):
-    race_key: str
-    held_on: date
-    venue_code: str
-    venue: str
-    race_no: int
-    name: Optional[str]
-    grade: Optional[str]
-    surface: Optional[str]
-    distance: Optional[int]
-    condition: Optional[str]
-    weather: Optional[str]
-    post_time: Optional[str]
-    head_count: Optional[int]
-    pace: Optional[str]                      # H|M|S
-    best_ev_tan: Optional[float]
-    best_ev_fuku: Optional[float]
-    ml_top: Optional[MlTop]
-    status: str                              # OPEN | DONE | NO_PREDICTION
-
-
 class Horse(BaseModel):
     horse_number: int
     waku: Optional[int]
@@ -54,6 +33,28 @@ class Horse(BaseModel):
     prob: Optional[float]
     ev_tan: Optional[float]
     ev_fuku: Optional[float]
+
+
+class RaceListItem(BaseModel):
+    race_key: str
+    held_on: date
+    venue_code: str
+    venue: str
+    race_no: int
+    name: Optional[str]
+    grade: Optional[str]
+    surface: Optional[str]
+    distance: Optional[int]
+    condition: Optional[str]
+    weather: Optional[str]
+    post_time: Optional[str]
+    head_count: Optional[int]
+    pace: Optional[str]                      # H|M|S
+    best_ev_tan: Optional[float]
+    best_ev_fuku: Optional[float]
+    ml_top: Optional[MlTop]
+    status: str                              # OPEN | DONE | NO_PREDICTION
+    horses: list[Horse] = []
 
 
 class RaceDetail(BaseModel):

@@ -74,6 +74,11 @@ def _race_to_list_item(race: Race) -> RaceListItem:
     else:
         status = "NO_PREDICTION"
 
+    horses = [
+        _horse_to_schema(h, latest_by_horse.get(h.id))
+        for h in sorted(race.horses, key=lambda x: x.horse_number)
+    ]
+
     return RaceListItem(
         race_key=race.race_key,
         held_on=race.held_on,
@@ -93,6 +98,7 @@ def _race_to_list_item(race: Race) -> RaceListItem:
         best_ev_fuku=best_ev_fuku,
         ml_top=ml_top,
         status=status,
+        horses=horses,
     )
 
 

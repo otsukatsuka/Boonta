@@ -168,6 +168,9 @@ table.dt td.l, table.dt th.l { text-align: left; }
 table.dt td.c, table.dt th.c { text-align: center; }
 table.dt tr:hover td { background: oklch(0.2 0.01 240); }
 table.dt tr.clickable { cursor: pointer; }
+table.dt th.sortable { cursor: pointer; user-select: none; }
+table.dt th.sortable:hover { color: var(--fg-1); background: var(--bg-3); }
+table.dt th.sort-asc, table.dt th.sort-desc { color: var(--amber); }
 
 .pos { color: var(--green); }
 .neg { color: var(--red); }
