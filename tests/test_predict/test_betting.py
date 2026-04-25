@@ -1,7 +1,11 @@
 """Tests for EV-based betting recommendations."""
 import pandas as pd
 
-from src.predict.betting import compute_expected_values, recommend_bets
+from src.predict.betting import (
+    compute_expected_values,
+    recommend_bets,
+    recommend_nagashi,
+)
 
 
 def _race_df() -> pd.DataFrame:
@@ -77,3 +81,51 @@ class TestRecommendBets:
             "tansho": [], "fukusho": [],
             "umaren_box": [], "sanrenpuku_box": [],
         }
+
+
+class TestRecommendNagashi:
+    def test_axis_and_partners(self):
+        # ev_fuku: h1=0.6*1.2=0.72, h2=0.3*2=0.6, h3=0.2*3=0.6, h4=0.05*6=0.3
+        # ev_tan:  h1=0.4, h2=0.5, h3=0.667, h4=0.333
+        # axis_criteria=ev_fuku threshold=0.5 → top: h1(0.72) clears
+        preds = [0.6, 0.3, 0.2, 0.05]
+        ev = compute_expected_values(_race_df(), preds)
+        result = recommend_nagashi(
+            ev,
+            axis_criteria="ev_fuku",
+            axis_threshold=0.5,
+            partner_criteria="ev_tan",
+            max_partners=3,
+        )
+        assert result["axis"] == 1
+        # Partners (excluding axis=1) by ev_tan desc: h3(0.667), h2(0.5), h4(0.333)
+        assert result["partners"] == [3, 2, 4]
+        # Combos: axis=1 + every pair from partners → C(3,2)=3
+        assert sorted(result["combos"]) == [(1, 2, 3), (1, 2, 4), (1, 3, 4)]
+
+    def test_no_axis_returns_none(self):
+        # All ev_fuku < 1.0 → no axis qualifies
+        preds = [0.6, 0.3, 0.2, 0.05]
+        ev = compute_expected_values(_race_df(), preds)
+        result = recommend_nagashi(ev, axis_criteria="ev_fuku", axis_threshold=1.0)
+        assert result == {"axis": None, "partners": [], "combos": []}
+
+    def test_max_partners_cap(self):
+        preds = [0.6, 0.3, 0.2, 0.05]
+        ev = compute_expected_values(_race_df(), preds)
+        result = recommend_nagashi(
+            ev,
+            axis_criteria="ev_fuku",
+            axis_threshold=0.5,
+            partner_criteria="ev_tan",
+            max_partners=2,
+        )
+        assert result["axis"] == 1
+        # Top 2 partners by ev_tan: h3(0.667), h2(0.5)
+        assert result["partners"] == [3, 2]
+        assert result["combos"] == [(1, 2, 3)]
+
+    def test_empty_df(self):
+        ev = pd.DataFrame(columns=["horse_number", "ev_tan", "ev_fuku"])
+        result = recommend_nagashi(ev)
+        assert result == {"axis": None, "partners": [], "combos": []}

@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.predict.betting import compute_expected_values, recommend_bets
+from src.predict.betting import (
+    compute_expected_values,
+    recommend_bets,
+    recommend_nagashi,
+)
 
 # Running style code to name mapping
 RUNNING_STYLE_NAMES = {
@@ -269,6 +273,21 @@ def _format_bets(ev_df: pd.DataFrame, ev_threshold: float) -> str:
     lines.append(
         f"  3連複BOX ({n_san}点, EV単TOP4): {_fmt_combo(sanren)}"
     )
+
+    nagashi = recommend_nagashi(ev_df, axis_threshold=ev_threshold)
+    if nagashi["axis"] is None:
+        lines.append(
+            f"  3連複軸1頭流し (軸EV複>{ev_threshold:.2f}): 軸該当なし → 見送り"
+        )
+    else:
+        axis = nagashi["axis"]
+        partners = nagashi["partners"]
+        combos = nagashi["combos"]
+        n_combo = len(combos)
+        lines.append(
+            f"  3連複軸1頭流し ({n_combo}点, 軸{axis}番 → 相手{_fmt_list(partners)}):"
+            f" {_fmt_combo(combos)}"
+        )
     return "\n".join(lines)
 
 

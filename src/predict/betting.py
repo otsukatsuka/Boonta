@@ -102,3 +102,54 @@ def recommend_bets(
         "umaren_box": umaren_box,
         "sanrenpuku_box": sanrenpuku_box,
     }
+
+
+def recommend_nagashi(
+    ev_df: pd.DataFrame,
+    axis_criteria: str = "ev_fuku",
+    axis_threshold: float = 1.0,
+    partner_criteria: str = "ev_tan",
+    max_partners: int = 5,
+) -> dict:
+    """軸1頭流し 買い目生成.
+
+    Pick the highest-ranked horse on ``axis_criteria`` whose value clears
+    ``axis_threshold`` as the axis. Take the top ``max_partners`` horses on
+    ``partner_criteria`` (excluding the axis) as partners. Combine into 3連複
+    (axis + 2 partners). If no horse clears the axis threshold, return
+    ``axis=None`` to signal "do not bet".
+
+    Args:
+        ev_df: Output of :func:`compute_expected_values`.
+        axis_criteria: Column to rank axis candidates ("ev_fuku" or "prob").
+        axis_threshold: Minimum ``axis_criteria`` value to qualify as axis.
+        partner_criteria: Column to rank partner candidates ("ev_tan" etc.).
+        max_partners: Maximum number of partner horses.
+
+    Returns:
+        Dict with keys ``axis`` (int|None), ``partners`` (list[int]),
+        ``combos`` (list[tuple[int,int,int]] sorted ascending).
+    """
+    empty: dict = {"axis": None, "partners": [], "combos": []}
+    if ev_df.empty or axis_criteria not in ev_df.columns:
+        return empty
+
+    axis_candidates = ev_df[ev_df[axis_criteria] > axis_threshold]
+    axis_candidates = axis_candidates.sort_values(axis_criteria, ascending=False)
+    if axis_candidates.empty:
+        return empty
+
+    axis = int(axis_candidates.iloc[0]["horse_number"])
+
+    if partner_criteria not in ev_df.columns:
+        return {"axis": axis, "partners": [], "combos": []}
+
+    partner_pool = ev_df[ev_df["horse_number"].astype(int) != axis]
+    partner_pool = partner_pool.sort_values(partner_criteria, ascending=False)
+    partners = partner_pool.head(max_partners)["horse_number"].astype(int).tolist()
+
+    combos = [
+        tuple(sorted((axis, *pair))) for pair in combinations(partners, 2)
+    ]
+
+    return {"axis": axis, "partners": partners, "combos": combos}

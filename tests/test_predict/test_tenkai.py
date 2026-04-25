@@ -119,3 +119,24 @@ class TestFormatTenkai:
 
         assert "期待値ランキング" not in output
         assert "買い目" not in output
+
+    def test_nagashi_section_with_axis(self):
+        df = _make_race_df()
+        # Force ev_fuku for horse 3 to clear threshold:
+        # ev_fuku = prob * fukusho_odds → 0.78 * 1.5 = 1.17 > 1.0
+        df["fukusho_odds"] = [1.5, 2.0, 1.4, 8.0]
+        predictions = [0.78, 0.65, 0.58, 0.25]
+        output = format_tenkai(df, predictions, ev_threshold=1.0)
+
+        assert "3連複軸1頭流し" in output
+        assert "見送り" not in output
+
+    def test_nagashi_skipped_when_no_axis(self):
+        df = _make_race_df()
+        # All ev_fuku << 1.0
+        df["fukusho_odds"] = [1.0, 1.0, 1.0, 1.0]
+        predictions = [0.05, 0.05, 0.05, 0.05]
+        output = format_tenkai(df, predictions, ev_threshold=1.0)
+
+        assert "3連複軸1頭流し" in output
+        assert "見送り" in output
