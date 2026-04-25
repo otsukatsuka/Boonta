@@ -97,6 +97,17 @@ Click-based CLI with commands: download, parse, train, predict, evaluate
 
 Always verify `.gitignore` before committing. JRDB credentials go in `.env` only. JRDB official specs are stored under `docs/private/jrdb_specs/` (gitignored).
 
+## Documentation Placement Rules
+
+This is a **public** GitHub repository. Documentation must be split:
+
+- **Public docs** (`docs/` directly): architecture, CLI reference, setup, development, features, Modal integration, evaluation strategies. **Do NOT include** JRDB byte-level field offsets, lengths, or repeating-structure layouts.
+- **JRDB spec details** → `docs/private/jrdb_specs/` (gitignored). Includes the official `*_doc_utf8.txt` files and the annotated `jrdb_fields_reference.md`.
+- **Handover documents** (containing personal bet amounts/payoffs, in-progress internal state, uncommitted-work logs) → `docs/private/handover/` (gitignored).
+- **Never create new `.md` files at the repository root** other than `README.md` and `CLAUDE.md`. Anything else goes under `docs/` (public) or `docs/private/` (private).
+
+Background: prior to 2026-04-25, JRDB spec files and handover docs were committed at the repo root and had to be purged from git history. Avoid recreating that situation.
+
 ## Parser Design
 
 JRDB uses CP932-encoded fixed-length records:
