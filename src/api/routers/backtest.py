@@ -123,7 +123,15 @@ def run(req: BacktestRunRequest, session: DbSession) -> BacktestRunResponse:
     preds_df = load_predictions_df(session, req.date_from, req.date_to, mv)
     hjc_df = load_hjc_df(session, req.date_from, req.date_to)
     if preds_df.empty or hjc_df.empty:
-        raise HTTPException(404, "No predictions or payouts in date range")
+        missing = []
+        if preds_df.empty:
+            missing.append("predictions")
+        if hjc_df.empty:
+            missing.append("payouts (HJC)")
+        raise HTTPException(
+            422,
+            f"No {' and '.join(missing)} in {req.date_from}..{req.date_to}",
+        )
 
     out: list[Strategy] = []
     for s in targets:

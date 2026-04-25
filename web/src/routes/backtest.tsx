@@ -202,7 +202,10 @@ function BacktestScreen() {
   const strategiesQ = useStrategies();
   const runMut = useRunBacktest();
   const all: Strategy[] = strategiesQ.data ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const search = Route.useSearch();
+  const [selectedId, setSelectedId] = useState<string | null>(
+    search.strategy ?? null,
+  );
 
   const selected = useMemo(
     () => all.find((s) => s.id === selectedId) ?? all[0] ?? null,
@@ -342,6 +345,12 @@ function BacktestScreen() {
   );
 }
 
+type BacktestSearch = { strategy?: string };
+
 export const Route = createFileRoute("/backtest")({
+  validateSearch: (search: Record<string, unknown>): BacktestSearch => ({
+    strategy:
+      typeof search.strategy === "string" ? search.strategy : undefined,
+  }),
   component: BacktestScreen,
 });

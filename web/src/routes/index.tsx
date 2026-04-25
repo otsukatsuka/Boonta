@@ -1,14 +1,103 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { Panel } from "../components/Panel";
+import { Sparkline } from "../components/Sparkline";
 import { Umaban } from "../components/Umaban";
 import { useEvThreshold } from "../components/TweaksPanel";
-import { usePredictBatch, useRaces } from "../hooks/useApi";
-import type { RaceListItem } from "../api/types";
+import { usePredictBatch, useRaces, useStrategies } from "../hooks/useApi";
+import type { RaceListItem, Strategy } from "../api/types";
 
 function todayJst(): string {
   const tz = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return tz.toISOString().slice(0, 10);
+}
+
+function roiClass(roi: number): string {
+  if (roi >= 100) return "pos";
+  if (roi >= 90) return "amb";
+  if (roi >= 70) return "";
+  return "neg";
+}
+
+function StrategyKpiList({ strategies }: { strategies: Strategy[] }) {
+  const navigate = useNavigate();
+  const sorted = useMemo(
+    () => [...strategies].sort((a, b) => b.roi - a.roi),
+    [strategies],
+  );
+  if (sorted.length === 0) {
+    return (
+      <div className="dim" style={{ padding: 12 }}>
+        まだバックテスト未実行。 BACKTEST タブの RUN か
+        <code> python cli.py backtest run --strategy all</code>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {sorted.map((s) => {
+        const pnl = s.returned - s.invested;
+        const equityVals = s.equity.map((p) => p.cum);
+        return (
+          <div
+            key={s.id}
+            className="clickable"
+            onClick={() =>
+              navigate({ to: "/backtest", search: { strategy: s.id } })
+            }
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "8px 12px",
+              borderBottom: "1px dashed var(--bg-3)",
+              gap: 8,
+            }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                className="bold"
+                style={{
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {s.label}
+              </div>
+              <div style={{ fontSize: 10, marginTop: 2 }}>
+                <span
+                  className={"tag " + (s.kind === "EV" ? "amber" : "cyan")}
+                >
+                  {s.kind}
+                </span>{" "}
+                <span className="dim tnum">
+                  {s.hits.toLocaleString()} / {s.bet_races.toLocaleString()} bets
+                </span>
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div className={"tnum bold " + roiClass(s.roi)} style={{ fontSize: 14 }}>
+                {s.roi.toFixed(1)}%
+              </div>
+              {equityVals.length > 0 ? (
+                <Sparkline
+                  data={equityVals}
+                  w={90}
+                  h={16}
+                  color={pnl >= 0 ? "var(--green)" : "var(--red)"}
+                />
+              ) : (
+                <div className="dim" style={{ fontSize: 10 }}>
+                  no equity
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function DashboardScreen() {
@@ -21,6 +110,15 @@ function DashboardScreen() {
   const racesQ = useRaces(date);
   const predictBatch = usePredictBatch();
   const races: RaceListItem[] = racesQ.data ?? [];
+  const strategiesQ = useStrategies();
+  const strategies: Strategy[] = strategiesQ.data ?? [];
+
+  const strategyMeta = useMemo(() => {
+    if (strategies.length === 0) return "no runs";
+    const froms = strategies.map((s) => s.date_from).sort();
+    const tos = strategies.map((s) => s.date_to).sort();
+    return `${froms[0]} → ${tos[tos.length - 1]}`;
+  }, [strategies]);
 
   const paceCounts = useMemo(() => {
     const counts: Record<string, number> = { H: 0, M: 0, S: 0 };
@@ -270,10 +368,14 @@ function DashboardScreen() {
             })}
           </div>
         </Panel>
-        <Panel title="戦略 KPI" meta="2025 backtest" flush>
-          <div className="dim" style={{ padding: 12 }}>
-            BACKTEST タブで集計表示 (Phase 2)
-          </div>
+        <Panel title="戦略 KPI" meta={strategyMeta} flush>
+          {strategiesQ.isLoading ? (
+            <div className="dim" style={{ padding: 12 }}>
+              loading…
+            </div>
+          ) : (
+            <StrategyKpiList strategies={strategies} />
+          )}
         </Panel>
       </div>
     </div>
