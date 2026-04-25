@@ -25,15 +25,20 @@ class JRDBDownloader:
         self.settings = settings or Settings()
         self.output_dir = self.settings.data_raw_dir
 
-    def _build_url(self, file_type: str, date_str: str) -> str:
+    def _build_url(self, file_type: str, date_str: str, use_year_subdir: bool = True) -> str:
         """Build download URL for a given file type and date.
 
         Args:
             file_type: One of "KYI", "SED", "HJC".
             date_str: Date in YYMMDD format (e.g. "260405").
+            use_year_subdir: If True, use 20YY/ subdirectory (current JRDB layout).
+                If False, fall back to legacy flat layout.
         """
         path_prefix, archive_fmt, file_prefix = FILE_TYPES[file_type]
         filename = f"{file_prefix}{date_str}.{archive_fmt}"
+        if use_year_subdir:
+            full_year = f"20{date_str[:2]}"
+            return f"{self.settings.jrdb_base_url}{path_prefix}{full_year}/{filename}"
         return f"{self.settings.jrdb_base_url}{path_prefix}{filename}"
 
     def _extract_zip(self, archive_path: Path) -> list[Path]:
@@ -77,7 +82,6 @@ class JRDBDownloader:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        url = self._build_url(file_type, date_str)
         _, archive_fmt, file_prefix = FILE_TYPES[file_type]
         archive_path = self.output_dir / f"{file_prefix}{date_str}.{archive_fmt}"
 
@@ -87,7 +91,11 @@ class JRDBDownloader:
 
         try:
             auth = (self.settings.jrdb_user, self.settings.jrdb_pass)
+            url = self._build_url(file_type, date_str, use_year_subdir=True)
             response = client.get(url, auth=auth, follow_redirects=True)
+            if response.status_code == 404:
+                url = self._build_url(file_type, date_str, use_year_subdir=False)
+                response = client.get(url, auth=auth, follow_redirects=True)
             response.raise_for_status()
 
             archive_path.write_bytes(response.content)

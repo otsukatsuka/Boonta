@@ -9,6 +9,18 @@ from src.parser import KYI_FIELDS, KYI_RECORD_LENGTH
 from src.parser.engine import parse_file
 from src.predict.tenkai import format_tenkai
 
+VENUE_NAMES = {
+    "01": "札幌", "02": "函館", "03": "福島", "04": "新潟", "05": "東京",
+    "06": "中山", "07": "中京", "08": "京都", "09": "阪神", "10": "小倉",
+}
+
+
+def _format_race_header(race_key: str) -> str:
+    venue_code = race_key[:2]
+    race_no = race_key[6:8]
+    venue = VENUE_NAMES.get(venue_code, f"場{venue_code}")
+    return f"【{venue} {int(race_no)}R】 race_key={race_key}"
+
 
 def run_prediction(
     kyi_path: Path,
@@ -65,6 +77,6 @@ def run_prediction(
         output = format_tenkai(
             race_df, predictions, show_bets=show_bets, ev_threshold=ev_threshold,
         )
-        outputs.append(output)
+        outputs.append(f"{_format_race_header(str(race_key))}\n{output}")
 
     return "\n\n".join(outputs) if outputs else "No races found."
