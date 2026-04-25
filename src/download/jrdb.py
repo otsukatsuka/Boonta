@@ -14,7 +14,7 @@ from config.settings import Settings
 FILE_TYPES = {
     "KYI": ("Kyi/", "zip", "KYI"),
     "SED": ("Sed/", "zip", "SED"),
-    "HJC": ("Hjc/", "lzh", "HJC"),
+    "HJC": ("Hjc/", "zip", "HJC"),
     "BAC": ("Bac/", "lzh", "BAC"),
 }
 
@@ -40,6 +40,10 @@ class JRDBDownloader:
         if file_type == "BAC":
             # BAC lives under /member/data/Bac/ (https, no year subdir)
             return f"https://jrdb.com/member/data/{path_prefix}{filename}"
+        if file_type == "HJC":
+            # HJC lives under https://jrdb.com/member/datazip/Hjc/{YYYY}/ (.zip, year subdir required)
+            full_year = f"20{date_str[:2]}"
+            return f"https://jrdb.com/member/datazip/{path_prefix}{full_year}/{filename}"
         if use_year_subdir:
             full_year = f"20{date_str[:2]}"
             return f"{self.settings.jrdb_base_url}{path_prefix}{full_year}/{filename}"

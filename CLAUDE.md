@@ -175,7 +175,7 @@ Race key structure: `場コード(2) + 年(2) + 回(1) + 日(1,hex) + R(2)` = 8 
 
 `ingest_*` validates `race_key` (venue 01-10, R 1-12) and drops malformed rows so a bad RECORD_LENGTH cannot leave orphan races in the DB.
 
-JRDB BAC has its own URL pattern: `https://jrdb.com/member/data/Bac/BAC{YYMMDD}.lzh` (no year subdirectory, https). Other types live under `http://www.jrdb.com/member/datazip/{Type}/20YY/{TYPE}{YYMMDD}.{ext}`.
+JRDB BAC has its own URL pattern: `https://jrdb.com/member/data/Bac/BAC{YYMMDD}.lzh` (no year subdirectory, https). HJC also uses its own pattern: `https://jrdb.com/member/datazip/Hjc/20YY/HJC{YYMMDD}.zip` (https + `jrdb.com` origin, `.zip` — JRDB stopped publishing `.lzh` for HJC). KYI/SED live under `http://www.jrdb.com/member/datazip/{Type}/20YY/{TYPE}{YYMMDD}.zip`.
 
 Reference docs (private, gitignored under `docs/private/jrdb_specs/`):
 - `kyi_doc_utf8.txt` - KYI field specification

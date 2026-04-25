@@ -43,20 +43,28 @@ def _make_zip_bytes(filename: str, content: bytes) -> bytes:
 class TestBuildURL:
     def test_kyi_url(self, downloader):
         url = downloader._build_url("KYI", "260405")
-        assert url == "http://www.jrdb.com/member/datazip/Kyi/KYI260405.zip"
+        assert url == "http://www.jrdb.com/member/datazip/Kyi/2026/KYI260405.zip"
 
     def test_sed_url(self, downloader):
         url = downloader._build_url("SED", "260405")
-        assert url == "http://www.jrdb.com/member/datazip/Sed/SED260405.zip"
+        assert url == "http://www.jrdb.com/member/datazip/Sed/2026/SED260405.zip"
 
     def test_hjc_url(self, downloader):
         url = downloader._build_url("HJC", "260405")
-        assert url == "http://www.jrdb.com/member/datazip/Hjc/HJC260405.lzh"
+        assert url == "https://jrdb.com/member/datazip/Hjc/2026/HJC260405.zip"
+
+    def test_bac_url(self, downloader):
+        url = downloader._build_url("BAC", "260405")
+        assert url == "https://jrdb.com/member/data/Bac/BAC260405.lzh"
+
+    def test_kyi_url_no_year_subdir_fallback(self, downloader):
+        url = downloader._build_url("KYI", "260405", use_year_subdir=False)
+        assert url == "http://www.jrdb.com/member/datazip/Kyi/KYI260405.zip"
 
 
 class TestFileTypes:
     def test_all_types_defined(self):
-        assert set(FILE_TYPES.keys()) == {"KYI", "SED", "HJC"}
+        assert set(FILE_TYPES.keys()) == {"KYI", "SED", "HJC", "BAC"}
 
     def test_invalid_type(self, downloader):
         with pytest.raises(ValueError, match="Unknown file type"):
@@ -70,6 +78,7 @@ class TestDownloadFile:
         zip_bytes = _make_zip_bytes("KYI260405.txt", sample_content)
 
         mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
         mock_response.content = zip_bytes
         mock_response.raise_for_status = MagicMock()
 
@@ -92,6 +101,7 @@ class TestDownloadFile:
         zip_bytes = _make_zip_bytes("KYI260405.txt", b"data")
 
         mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
         mock_response.content = zip_bytes
         mock_response.raise_for_status = MagicMock()
 
@@ -111,6 +121,7 @@ class TestDownloadFile:
 
         zip_bytes = _make_zip_bytes("KYI260405.txt", b"data")
         mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
         mock_response.content = zip_bytes
         mock_response.raise_for_status = MagicMock()
 
@@ -123,8 +134,9 @@ class TestDownloadFile:
     def test_http_error_raises(self, downloader):
         """Test that HTTP errors are propagated."""
         mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 500
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "404", request=MagicMock(), response=MagicMock()
+            "500", request=MagicMock(), response=MagicMock()
         )
 
         mock_client = MagicMock(spec=httpx.Client)
@@ -139,6 +151,7 @@ class TestDownloadDateRange:
         """Test downloading multiple dates."""
         zip_bytes = _make_zip_bytes("KYI260405.txt", b"data")
         mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
         mock_response.content = zip_bytes
         mock_response.raise_for_status = MagicMock()
 
