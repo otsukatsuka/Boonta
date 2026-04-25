@@ -7,6 +7,12 @@ notebooks/
 *.csv
 models/
 
+# Private docs (JRDB specs, handover memos) — must NEVER be committed
+docs/private/
+
+# JRDB official spec files (membership-only)
+*_doc_utf8.txt
+
 # Python
 __pycache__/
 *.pyc

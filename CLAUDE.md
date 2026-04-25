@@ -92,8 +92,10 @@ Click-based CLI with commands: download, parse, train, predict, evaluate
 - `*.csv`, `*.lzh`, `*.zip` files
 - `.env` file (JRDB credentials)
 - `models/` directory
+- `*_doc_utf8.txt` (JRDB official spec files — membership-only)
+- `docs/private/` (JRDB specs and handover memos)
 
-Always verify `.gitignore` before committing. JRDB credentials go in `.env` only.
+Always verify `.gitignore` before committing. JRDB credentials go in `.env` only. JRDB official specs are stored under `docs/private/jrdb_specs/` (gitignored).
 
 ## Parser Design
 
@@ -106,10 +108,11 @@ Field specs use 1-based byte offsets (matching JRDB docs). Parser converts to 0-
 
 Race key structure: `場コード(2) + 年(2) + 回(1) + 日(1,hex) + R(2)` = 8 chars
 
-Reference docs:
+Reference docs (private, gitignored under `docs/private/jrdb_specs/`):
 - `kyi_doc_utf8.txt` - KYI field specification
 - `sed_doc_utf8.txt` - SED field specification
 - `hjcdata_doc_utf8.txt` - HJC field specification
+- `jrdb_fields_reference.md` - Annotated subset used by ML features
 
 ## Feature Engineering
 
@@ -164,8 +167,15 @@ tests/
 
 ## Related Documents
 
-- `design2.md` - Full system design specification
-- `boonta_v2_requirements.md` - Requirements document
-- `kyi_doc_utf8.txt` - KYI (競走馬データ) field spec
-- `sed_doc_utf8.txt` - SED (成績データ) field spec
-- `hjcdata_doc_utf8.txt` - HJC (払戻データ) field spec
+Public docs (under `docs/`):
+- `docs/ARCHITECTURE.md` - System design, data pipeline, module responsibilities
+- `docs/CLI.md` - Full CLI command reference
+- `docs/SETUP.md` - Environment setup
+- `docs/DEVELOPMENT.md` - Dev workflow, testing, coding conventions
+- `docs/FEATURES.md` - Feature engineering (~35 features in 6 categories)
+- `docs/MODAL.md` - Modal integration, function specs, ops tips
+- `docs/EVALUATION.md` - ROI / EV strategies and backtesting
+
+Private docs (gitignored under `docs/private/`):
+- `docs/private/jrdb_specs/` - JRDB official spec files + ML field reference
+- `docs/private/handover/` - Internal handover notes (E2E_HANDOVER, BACKTEST_HANDOVER)
