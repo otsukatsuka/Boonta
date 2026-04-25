@@ -172,8 +172,13 @@ def predict(
 @cli.command()
 @click.option("--date-range", nargs=2, required=True, help="Start and end dates (YYYYMMDD)")
 @click.option("--strategy", default="fukusho_top3",
-              type=click.Choice(["fukusho_top3", "umaren_top2", "sanrenpuku_top3"]))
-def evaluate(date_range: tuple[str, str], strategy: str):
+              type=click.Choice([
+                  "fukusho_top3", "umaren_top2", "sanrenpuku_top3",
+                  "ev_tansho", "ev_fukusho", "ev_sanrenpuku_nagashi",
+              ]))
+@click.option("--ev-threshold", type=float, default=1.0,
+              help="Minimum EV for EV-based strategies (ignored otherwise)")
+def evaluate(date_range: tuple[str, str], strategy: str, ev_threshold: float):
     """Evaluate ROI using predictions and HJC payoff data."""
     from src.features.engineering import build_prediction_features
     from src.model.client import ModalClient
@@ -188,7 +193,8 @@ def evaluate(date_range: tuple[str, str], strategy: str):
 
     settings = Settings()
 
-    click.echo(f"Evaluating ROI ({strategy}) for {date_range[0]} to {date_range[1]}...")
+    label = f"{strategy}, ev>{ev_threshold}" if strategy.startswith("ev_") else strategy
+    click.echo(f"Evaluating ROI ({label}) for {date_range[0]} to {date_range[1]}...")
 
     # Parse KYI files in date range
     kyi_paths = _filter_by_date_range(
@@ -212,7 +218,7 @@ def evaluate(date_range: tuple[str, str], strategy: str):
 
     for race_key, race_df in features_df.groupby("race_key"):
         feature_cols = [c for c in race_df.columns
-                       if c not in ("race_key", "horse_name")]
+                       if c not in ("race_key", "horse_name", "fukusho_odds")]
         features_list = race_df[feature_cols].to_dict("records")
 
         try:
@@ -220,7 +226,10 @@ def evaluate(date_range: tuple[str, str], strategy: str):
             if result.get("success"):
                 race_df = race_df.copy()
                 race_df["predict_prob"] = result["predictions"]
-                all_predictions.append(race_df[["race_key", "horse_number", "predict_prob"]])
+                keep = ["race_key", "horse_number", "predict_prob", "odds"]
+                if "fukusho_odds" in race_df.columns:
+                    keep.append("fukusho_odds")
+                all_predictions.append(race_df[keep])
         except Exception as e:
             click.echo(f"  Prediction failed for {race_key}: {e}")
 
@@ -247,11 +256,13 @@ def evaluate(date_range: tuple[str, str], strategy: str):
     hjc_df = pd.concat(hjc_frames, ignore_index=True)
 
     # Evaluate ROI
-    result = evaluate_roi(predictions_df, hjc_df, strategy)
+    result = evaluate_roi(predictions_df, hjc_df, strategy, ev_threshold=ev_threshold)
 
     click.echo(f"\n{'=' * 40}")
     click.echo(f"戦略: {result['strategy']}")
     click.echo(f"レース数: {result['race_count']}")
+    if "bet_race_count" in result:
+        click.echo(f"購入レース数: {result['bet_race_count']}")
     click.echo(f"投資額: {result['total_bets']:,}円")
     click.echo(f"回収額: {result['total_return']:,}円")
     click.echo(f"回収率: {result['roi']}%")
