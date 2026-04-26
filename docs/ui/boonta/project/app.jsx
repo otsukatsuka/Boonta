@@ -508,8 +508,8 @@ window.RaceTerminalApp = function RaceTerminalApp({ initialTab = "dash", initial
         {tab === "dash" && <DashboardScreen onOpenRace={openRace} evThreshold={evThreshold}/>}
         {tab === "race" && <RaceDetailScreen raceKey={raceKey} evThreshold={evThreshold} onBack={()=>setTab("dash")}/>}
         {tab === "back" && <BacktestScreen evThreshold={evThreshold}/>}
-        {tab === "data" && <PlaceholderScreen label="DATA · download / parse"/>}
-        {tab === "model" && <PlaceholderScreen label="MODEL · Modal training jobs"/>}
+        {tab === "data" && <window.DataScreen/>}
+        {tab === "model" && <window.ModelScreen/>}
       </div>
       <StatusBar tab={tab} evThreshold={evThreshold}/>
       {showTweaks && <TweaksPanelWrap evThreshold={evThreshold} setEvThreshold={setEvThreshold}/>}

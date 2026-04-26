@@ -15,9 +15,12 @@
 
 <script src="data.js"></script>
 <script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
 <script type="text/babel" src="components.jsx"></script>
 <script type="text/babel" src="tweaks-panel.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
+<script type="text/babel" src="app-data-model.jsx"></script>
+<script type="text/babel" src="app-mobile.jsx"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -48,6 +51,33 @@ function CanvasRoot() {
           <div id="root-a-proto" style={{height:"100%"}}></div>
         </DCArtboard>
       </DCSection>
+
+      <DCSection id="pipeline" title="PIPELINE TABS  ·  DATA / MODEL  (パイプライン側の画面)">
+        <DCArtboard id="A-data" label="④ DATA — JRDB feeds・カバレッジ・KYI特徴量インスペクタ・CLIログ" width={1400} height={1080}>
+          <div id="root-a-data" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="A-model" label="⑤ MODEL — 学習ラン・Leaderboard・Calibration・Feature Importance" width={1400} height={1080}>
+          <div id="root-a-model" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="mobile" title="MOBILE  ·  iPhone レスポンシブ版 (375pt 設計, 同じデータ・同じ AI 出力)">
+        <DCArtboard id="M-dash" label="① Dashboard — 本日のレース一覧 (BUY/WATCH/SKIPシグナル)" width={420} height={900}>
+          <div id="root-m-dash" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="M-race" label="② Race Detail — EVランキング → 位置取り → 買い目 (3セクション)" width={420} height={900}>
+          <div id="root-m-race" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="M-back" label="③ Backtest — 戦略マトリクス + ROI + Equity Spark" width={420} height={900}>
+          <div id="root-m-back" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="M-more" label="④ Settings — EV閾値スライダー / システム情報" width={420} height={900}>
+          <div id="root-m-more" style={{height:"100%"}}></div>
+        </DCArtboard>
+        <DCArtboard id="M-proto" label="⑤ LIVE — 4タブ切替動作 (タップでレース詳細へ遷移)" width={420} height={900}>
+          <div id="root-m-proto" style={{height:"100%"}}></div>
+        </DCArtboard>
+      </DCSection>
     </DesignCanvas>
   );
 }
@@ -71,6 +101,27 @@ mountWhenReady("root-a-dash", () => <window.RaceTerminalApp initialTab="dash" sh
 mountWhenReady("root-a-race", () => <window.RaceTerminalApp initialTab="race" showTweaks={false}/>);
 mountWhenReady("root-a-back", () => <window.RaceTerminalApp initialTab="back" showTweaks={false}/>);
 mountWhenReady("root-a-proto", () => <window.RaceTerminalApp initialTab="dash" showTweaks={true}/>);
+mountWhenReady("root-a-data", () => <window.RaceTerminalApp initialTab="data" showTweaks={false}/>);
+mountWhenReady("root-a-model", () => <window.RaceTerminalApp initialTab="model" showTweaks={false}/>);
+
+// Mobile artboards — wrap each in an iPhone frame
+const { IOSDevice } = window;
+function MobileShell({ initialTab }) {
+  // force a specific tab on first mount via key-trick: call setter inside an effect
+  const App = window.RaceTerminalMobileApp;
+  return (
+    <div style={{display:"flex", justifyContent:"center", alignItems:"center", height:"100%", padding:"10px"}}>
+      <IOSDevice width={390} height={844} dark={true}>
+        <App initialTab={initialTab}/>
+      </IOSDevice>
+    </div>
+  );
+}
+mountWhenReady("root-m-dash",  () => <MobileShell initialTab="dash"/>);
+mountWhenReady("root-m-race",  () => <MobileShell initialTab="race"/>);
+mountWhenReady("root-m-back",  () => <MobileShell initialTab="back"/>);
+mountWhenReady("root-m-more",  () => <MobileShell initialTab="more"/>);
+mountWhenReady("root-m-proto", () => <MobileShell initialTab="dash"/>);
 </script>
 </body>
 </html>

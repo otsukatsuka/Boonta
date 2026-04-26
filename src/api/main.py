@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routers import backtest, predict, races, system
+from src.api.routers import backtest, data, model, predict, races, system
 
 app = FastAPI(title="Boonta WebUI API", version="0.1.0")
 
@@ -19,6 +19,8 @@ app.include_router(system.router, prefix="/api")
 app.include_router(races.router, prefix="/api")
 app.include_router(predict.router, prefix="/api")
 app.include_router(backtest.router, prefix="/api")
+app.include_router(data.router, prefix="/api")
+app.include_router(model.router, prefix="/api")
 
 
 @app.get("/health")

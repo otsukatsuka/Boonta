@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -207,4 +208,27 @@ class BacktestSensitivity(Base):
 
     __table_args__ = (
         UniqueConstraint("run_id", "ev_threshold", name="uq_sensitivity_run_thr"),
+    )
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_run"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    trained_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    preset: Mapped[str] = mapped_column(String(32), nullable=False)
+    logloss: Mapped[Optional[float]] = mapped_column(Float)
+    auc: Mapped[Optional[float]] = mapped_column(Float)
+    brier: Mapped[Optional[float]] = mapped_column(Float)
+    hit_at_3: Mapped[Optional[float]] = mapped_column(Float)
+    train_time_seconds: Mapped[Optional[int]] = mapped_column(Integer)
+    num_samples: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="DEPLOYED")
+    leaderboard_json: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("ix_training_run_trained_at", "trained_at"),
+        Index("ix_training_run_status", "status"),
     )

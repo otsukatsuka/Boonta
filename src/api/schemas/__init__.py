@@ -6,6 +6,22 @@ from src.api.schemas.backtest import (
     SensitivityRow,
     Strategy,
 )
+from src.api.schemas.data import (
+    CoverageResponse,
+    FeatureMeta,
+    FeatureStat,
+    FeedRow,
+    FeedsResponse,
+)
+from src.api.schemas.model import (
+    CalibrationBin,
+    CalibrationResponse,
+    FeatureImportanceRow,
+    LeaderboardResponse,
+    LeaderboardRow,
+    ModelStatusOut,
+    TrainingRunOut,
+)
 from src.api.schemas.race import (
     Horse,
     MlTop,
@@ -31,4 +47,16 @@ __all__ = [
     "SensitivityRow",
     "BacktestRunRequest",
     "BacktestRunResponse",
+    "FeedRow",
+    "FeedsResponse",
+    "CoverageResponse",
+    "FeatureMeta",
+    "FeatureStat",
+    "TrainingRunOut",
+    "LeaderboardRow",
+    "LeaderboardResponse",
+    "FeatureImportanceRow",
+    "CalibrationBin",
+    "CalibrationResponse",
+    "ModelStatusOut",
 ]

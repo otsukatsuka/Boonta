@@ -133,6 +133,112 @@ export interface BacktestRunResponse {
   elapsed_ms: number;
 }
 
+/* ---------- DATA tab ---------- */
+
+export type FeedStatus = "OK" | "WARN" | "NA";
+
+export interface FeedRow {
+  id: string;
+  name: string;
+  status: FeedStatus;
+  bytes: number | null;
+  rows: number | null;
+  last_iso: string | null;
+  lag_minutes: number | null;
+}
+
+export interface FeedsResponse {
+  feeds: FeedRow[];
+  total_bytes: number;
+  total_rows: number;
+  ok_count: number;
+  total_count: number;
+  latest_iso: string | null;
+}
+
+export interface CoverageResponse {
+  years: number[];
+  counts: number[][];
+}
+
+export interface FeatureMeta {
+  name: string;
+  jp_label: string | null;
+  type: "num" | "cat";
+  importance: number | null;
+}
+
+export interface FeatureStat {
+  name: string;
+  type: "num" | "cat";
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  std: number | null;
+  missing_pct: number | null;
+  cardinality: number | null;
+}
+
+/* ---------- MODEL tab ---------- */
+
+export interface TrainingRunOut {
+  id: number;
+  run_id: string;
+  trained_at: string;
+  preset: string;
+  logloss: number | null;
+  auc: number | null;
+  brier: number | null;
+  hit_at_3: number | null;
+  train_time_seconds: number | null;
+  num_samples: number | null;
+  status: string;
+}
+
+export interface LeaderboardRow {
+  model: string;
+  score_val: number | null;
+  eval_metric: string | null;
+  fit_time: number | null;
+  weight: number | null;
+}
+
+export interface LeaderboardResponse {
+  run_id: string | null;
+  rows: LeaderboardRow[];
+}
+
+export interface FeatureImportanceRow {
+  name: string;
+  jp_label: string | null;
+  importance: number;
+}
+
+export interface CalibrationBin {
+  pred_mid: number;
+  actual_rate: number;
+  n: number;
+}
+
+export interface CalibrationResponse {
+  run_id: string | null;
+  bins: CalibrationBin[];
+  ece: number | null;
+  mce: number | null;
+  n_total: number;
+  window_from: string | null;
+  window_to: string | null;
+}
+
+export interface ModelStatusOut {
+  deployed_run_id: string | null;
+  trained_at: string | null;
+  num_samples: number | null;
+  best_score: number | null;
+  preset: string | null;
+  modal_ready: boolean;
+}
+
 /** UI-side helpers (computed in TS, not from API). */
 export interface NagashiPlan {
   axis: number | null;

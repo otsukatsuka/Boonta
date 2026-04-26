@@ -391,8 +391,71 @@ def train(date_range: tuple[str, str], time_limit: int):
     if result.get("success"):
         click.echo(f"Training complete! Best score: {result.get('best_score')}")
         click.echo(f"Best model: {result.get('best_model')}")
+        _record_training_run(result, time_limit=time_limit)
     else:
         click.echo(f"Training failed: {result.get('error')}")
+
+
+def _record_training_run(result: dict, time_limit: int) -> None:
+    """Insert a TrainingRun row, mark prior DEPLOYED rows as archived."""
+    import json
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select, update
+
+    from src.db.models import TrainingRun
+    from src.db.session import session_scope
+
+    settings = Settings()
+    leaderboard = result.get("leaderboard") or []
+    eval_metric = result.get("eval_metric")
+    best_score = result.get("best_score")
+
+    auc_val = best_score if eval_metric == "roc_auc" else None
+    logloss_val = best_score if eval_metric == "log_loss" else None
+
+    trained_at_raw = result.get("trained_at")
+    try:
+        trained_at = (
+            datetime.fromisoformat(str(trained_at_raw).replace("Z", "+00:00"))
+            if trained_at_raw
+            else datetime.now(timezone.utc)
+        )
+    except ValueError:
+        trained_at = datetime.now(timezone.utc)
+
+    base_run_id = f"v{trained_at.strftime('%y.%m.%d')}"
+    with session_scope() as session:
+        run_id = base_run_id
+        suffix = 2
+        while session.scalar(
+            select(TrainingRun).where(TrainingRun.run_id == run_id)
+        ):
+            run_id = f"{base_run_id}-{suffix}"
+            suffix += 1
+
+        session.execute(
+            update(TrainingRun)
+            .where(TrainingRun.status == "DEPLOYED")
+            .values(status="archived")
+        )
+        session.add(
+            TrainingRun(
+                run_id=run_id,
+                trained_at=trained_at.replace(tzinfo=None),
+                preset=result.get("presets_used") or settings.autogluon_presets,
+                logloss=logloss_val,
+                auc=auc_val,
+                brier=None,
+                hit_at_3=None,
+                train_time_seconds=result.get("train_time_seconds"),
+                num_samples=result.get("num_samples"),
+                status="DEPLOYED",
+                leaderboard_json=json.dumps(leaderboard) if leaderboard else None,
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+        )
+    click.echo(f"Recorded training_run row {run_id} (DEPLOYED).")
 
 
 @cli.command()

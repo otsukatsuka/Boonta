@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from io import StringIO
 
@@ -149,11 +150,18 @@ def train_model(
     if excluded_model_types:
         fit_kwargs["excluded_model_types"] = excluded_model_types
 
+    fit_start = time.time()
     predictor.fit(**fit_kwargs)
+    train_time_seconds = int(time.time() - fit_start)
 
-    leaderboard = predictor.leaderboard(silent=True)
+    try:
+        leaderboard = predictor.leaderboard(silent=True, extra_info=True)
+    except TypeError:
+        leaderboard = predictor.leaderboard(silent=True)
+
     best_score = float(leaderboard["score_val"].max()) if len(leaderboard) > 0 else None
     best_model = leaderboard.iloc[0]["model"] if len(leaderboard) > 0 else "unknown"
+    leaderboard_records = json.loads(leaderboard.to_json(orient="records"))
 
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -161,10 +169,16 @@ def train_model(
         "presets": presets,
         "best_model": str(best_model),
         "best_score": best_score,
+        "train_time_seconds": train_time_seconds,
+        "eval_metric": "roc_auc",
     }
     metadata_path = os.path.join(VOLUME_PATH, model_name, "metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f)
+
+    leaderboard_path = os.path.join(VOLUME_PATH, model_name, "leaderboard.json")
+    with open(leaderboard_path, "w") as f:
+        json.dump(leaderboard_records, f)
 
     model_volume.commit()
 
@@ -176,6 +190,9 @@ def train_model(
         "best_model": str(best_model),
         "best_score": best_score,
         "trained_at": metadata["trained_at"],
+        "train_time_seconds": train_time_seconds,
+        "leaderboard": leaderboard_records,
+        "eval_metric": "roc_auc",
     }
 
 

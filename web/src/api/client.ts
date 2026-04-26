@@ -1,6 +1,14 @@
 import type {
   BacktestRunRequest,
   BacktestRunResponse,
+  CalibrationResponse,
+  CoverageResponse,
+  FeatureImportanceRow,
+  FeatureMeta,
+  FeatureStat,
+  FeedsResponse,
+  LeaderboardResponse,
+  ModelStatusOut,
   PredictBatchResponse,
   PredictResponse,
   RaceDetail,
@@ -8,6 +16,7 @@ import type {
   SensitivityRow,
   Strategy,
   SystemStatus,
+  TrainingRunOut,
 } from "./types";
 
 const BASE = ""; // dev proxy & same-origin in prod
@@ -50,4 +59,29 @@ export const api = {
     jget<SensitivityRow[]>(`/api/backtest/${runId}/sensitivity`),
   runBacktest: (req: BacktestRunRequest) =>
     jpost<BacktestRunResponse>(`/api/backtest/run`, req),
+
+  getFeeds: () => jget<FeedsResponse>("/api/system/feeds"),
+  getCoverage: (fromYear?: number, toYear?: number) => {
+    const qs: string[] = [];
+    if (fromYear) qs.push(`from_year=${fromYear}`);
+    if (toYear) qs.push(`to_year=${toYear}`);
+    const q = qs.length ? `?${qs.join("&")}` : "";
+    return jget<CoverageResponse>(`/api/system/coverage${q}`);
+  },
+  getFeatures: () => jget<FeatureMeta[]>("/api/system/features"),
+  getFeatureStats: () => jget<FeatureStat[]>("/api/system/feature-stats"),
+
+  getModelStatus: () => jget<ModelStatusOut>("/api/model/status"),
+  getTrainingRuns: (limit = 6) =>
+    jget<TrainingRunOut[]>(`/api/model/training-runs?limit=${limit}`),
+  getLeaderboard: (runId?: string) => {
+    const q = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    return jget<LeaderboardResponse>(`/api/model/leaderboard${q}`);
+  },
+  getFeatureImportance: () =>
+    jget<FeatureImportanceRow[]>("/api/model/feature-importance"),
+  getCalibration: (runId?: string) => {
+    const q = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    return jget<CalibrationResponse>(`/api/model/calibration${q}`);
+  },
 };
