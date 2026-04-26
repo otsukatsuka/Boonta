@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import time
+from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -71,13 +72,28 @@ def _to_strategy_schema(run: BacktestRun) -> Strategy:
 
 
 @router.get("/strategies", response_model=list[Strategy])
-def list_strategies(session: DbSession) -> list[Strategy]:
-    """Latest run per strategy (most recent computed_at wins)."""
-    runs = session.scalars(
+def list_strategies(
+    session: DbSession,
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+) -> list[Strategy]:
+    """Latest run per strategy (most recent computed_at wins).
+
+    If both date_from and date_to are given, only runs whose period exactly
+    matches are returned. With no date params, the latest run of any period
+    is returned (legacy behavior).
+    """
+    stmt = (
         select(BacktestRun)
         .options(selectinload(BacktestRun.details))
         .order_by(BacktestRun.strategy, BacktestRun.computed_at.desc())
-    ).all()
+    )
+    if date_from is not None and date_to is not None:
+        stmt = stmt.where(
+            BacktestRun.date_from == date_from,
+            BacktestRun.date_to == date_to,
+        )
+    runs = session.scalars(stmt).all()
 
     seen: set[str] = set()
     latest: list[BacktestRun] = []

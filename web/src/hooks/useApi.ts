@@ -48,10 +48,10 @@ export function usePredictBatch() {
   });
 }
 
-export function useStrategies() {
+export function useStrategies(dateFrom?: string, dateTo?: string) {
   return useQuery({
-    queryKey: ["strategies"],
-    queryFn: () => api.listStrategies(),
+    queryKey: ["strategies", dateFrom ?? null, dateTo ?? null],
+    queryFn: () => api.listStrategies(dateFrom, dateTo),
     staleTime: 5 * 60_000,
   });
 }

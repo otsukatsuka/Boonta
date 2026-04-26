@@ -39,7 +39,13 @@ export const api = {
     jpost<PredictResponse>(`/api/races/${raceKey}/predict`),
   predictBatch: (date: string) =>
     jpost<PredictBatchResponse>(`/api/races/predict-batch`, { date }),
-  listStrategies: () => jget<Strategy[]>(`/api/backtest/strategies`),
+  listStrategies: (dateFrom?: string, dateTo?: string) => {
+    const qs =
+      dateFrom && dateTo
+        ? `?date_from=${dateFrom}&date_to=${dateTo}`
+        : "";
+    return jget<Strategy[]>(`/api/backtest/strategies${qs}`);
+  },
   getSensitivity: (runId: number) =>
     jget<SensitivityRow[]>(`/api/backtest/${runId}/sensitivity`),
   runBacktest: (req: BacktestRunRequest) =>

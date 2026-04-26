@@ -199,7 +199,7 @@ function BacktestScreen() {
   const today = todayJst();
   const [dateFrom, setDateFrom] = useState(oneYearAgo(today));
   const [dateTo, setDateTo] = useState(today);
-  const strategiesQ = useStrategies();
+  const strategiesQ = useStrategies(dateFrom, dateTo);
   const runMut = useRunBacktest();
   const all: Strategy[] = strategiesQ.data ?? [];
   const search = Route.useSearch();
@@ -275,7 +275,7 @@ function BacktestScreen() {
         <span className="dim" style={{ marginLeft: "auto" }}>
           {runMut.isPending
             ? "evaluating 6 strategies (5–15 min)…"
-            : `${all.length} strategies stored`}
+            : `${all.length} strategies in ${dateFrom} → ${dateTo}`}
         </span>
       </div>
 
