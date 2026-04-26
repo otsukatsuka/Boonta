@@ -107,6 +107,11 @@ class Prediction(Base):
     ev_tan: Mapped[Optional[float]] = mapped_column(Float)
     ev_fuku: Mapped[Optional[float]] = mapped_column(Float)
     predicted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Phase 2: lambdarank-derived probabilities (filled when --model-type=both)
+    prob_win: Mapped[Optional[float]] = mapped_column(Float)
+    prob_top2: Mapped[Optional[float]] = mapped_column(Float)
+    prob_top3: Mapped[Optional[float]] = mapped_column(Float)
+    lambdarank_score: Mapped[Optional[float]] = mapped_column(Float)
 
     horse_entry: Mapped[HorseEntry] = relationship(back_populates="predictions")
 
@@ -131,6 +136,58 @@ class HjcPayout(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     race: Mapped[Race] = relationship(back_populates="payout")
+
+
+class RaceOdds(Base):
+    """Pre-race combination odds (OW/OU/OT). One row per race; bet types
+    stored as JSON dicts so all of wide/umatan/sanrenpuku live together."""
+    __tablename__ = "race_odds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("race.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    head_count: Mapped[Optional[int]] = mapped_column(Integer)
+    wide: Mapped[Optional[dict]] = mapped_column(JSON)        # {"01-02": 5.5, ...}
+    umatan: Mapped[Optional[dict]] = mapped_column(JSON)      # ordered pair keys
+    sanrenpuku: Mapped[Optional[dict]] = mapped_column(JSON)  # sorted triplet keys
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CybRecord(Base):
+    """Per-horse training analysis (CYB). One row per (race, horse)."""
+    __tablename__ = "cyb_record"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    horse_entry_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("horse_entry.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    finish_index: Mapped[Optional[int]] = mapped_column(Integer)
+    chase_index: Mapped[Optional[int]] = mapped_column(Integer)
+    training_eval: Mapped[Optional[str]] = mapped_column(String(2))
+    raw: Mapped[dict] = mapped_column(JSON, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class KkaRecord(Base):
+    """Extended past-race summary (KKA). One row per (race, horse)."""
+    __tablename__ = "kka_record"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    horse_entry_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("horse_entry.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    raw: Mapped[dict] = mapped_column(JSON, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class BacktestRun(Base):
@@ -222,6 +279,7 @@ class TrainingRun(Base):
     auc: Mapped[Optional[float]] = mapped_column(Float)
     brier: Mapped[Optional[float]] = mapped_column(Float)
     hit_at_3: Mapped[Optional[float]] = mapped_column(Float)
+    ece: Mapped[Optional[float]] = mapped_column(Float)
     train_time_seconds: Mapped[Optional[int]] = mapped_column(Integer)
     num_samples: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="DEPLOYED")

@@ -11,22 +11,31 @@ def evaluate_roi(
     hjc_df: pd.DataFrame,
     strategy: str = "fukusho_top3",
     ev_threshold: float = 1.0,
+    race_odds_df: pd.DataFrame | None = None,
 ) -> dict:
     """Evaluate ROI by comparing predictions against actual payoffs.
 
     Args:
         predictions_df: DataFrame with columns: race_key, horse_number, predict_prob.
             For EV-based strategies, must also include: odds, fukusho_odds.
+            Phase 4 multibet strategies additionally use ``prob_win`` (P(1着));
+            falls back to predict_prob/3 when prob_win is missing.
         hjc_df: Parsed HJC DataFrame with payoff columns.
         strategy: Betting strategy. One of:
             - "fukusho_top3": Place bet on top 3 predicted horses (100 yen each)
             - "umaren_top2": Quinella on top 2 predicted horses (100 yen)
             - "sanrenpuku_top3": Trifecta on top 3 predicted horses (100 yen)
-            - "ev_tansho": Win bet on horses with ev_tan > threshold (100 yen each)
-            - "ev_fukusho": Place bet on horses with ev_fuku > threshold (100 yen each)
-            - "ev_sanrenpuku_nagashi": 3連複1頭流し per axis (ev_fuku > threshold)
-              with 5 partners by ev_tan (10 combos × 100 yen per axis)
+            - "ev_tansho": Win bet on horses with ev_tan > threshold
+            - "ev_fukusho": Place bet on horses with ev_fuku > threshold
+            - "ev_sanrenpuku_nagashi": 3連複1頭流し per axis
+            - **Phase 4** (require ``race_odds_df``):
+              - "ev_wide": ワイド combos with EV > threshold (Plackett-Luce)
+              - "ev_umatan": 馬単 combos with EV > threshold
+              - "ev_sanrenpuku_box": 三連複 combos with EV > threshold
         ev_threshold: Minimum expected value for EV-based strategies.
+        race_odds_df: DataFrame with columns race_key, wide, umatan, sanrenpuku
+            (each holding a JSON dict combo_key → odds). Required by Phase 4
+            strategies (ev_wide / ev_umatan / ev_sanrenpuku_box).
 
     Returns:
         Dict with total_bets, total_return, roi, hit_count, race_count, details.
@@ -44,10 +53,20 @@ def evaluate_roi(
         return _evaluate_ev_fukusho(predictions_df, hjc_df, ev_threshold)
     if strategy == "ev_sanrenpuku_nagashi":
         return _evaluate_ev_sanrenpuku_nagashi(predictions_df, hjc_df, ev_threshold)
+    # Phase 4: multibet EV strategies — require race_odds_df
+    if strategy in {"ev_wide", "ev_umatan", "ev_sanrenpuku_box"}:
+        if race_odds_df is None:
+            raise ValueError(
+                f"Strategy {strategy} requires race_odds_df (pre-race combination odds)"
+            )
+        return _evaluate_multibet_ev(
+            predictions_df, hjc_df, race_odds_df, strategy, ev_threshold
+        )
 
     valid = [
         "fukusho_top3", "umaren_top2", "sanrenpuku_top3",
         "ev_tansho", "ev_fukusho", "ev_sanrenpuku_nagashi",
+        "ev_wide", "ev_umatan", "ev_sanrenpuku_box",
     ]
     raise ValueError(f"Unknown strategy: {strategy}. Must be one of {valid}")
 
@@ -381,6 +400,180 @@ def _evaluate_ev_fukusho(
 
     return {
         "strategy": "ev_fukusho",
+        "ev_threshold": ev_threshold,
+        "total_bets": total_bets,
+        "total_return": total_return,
+        "roi": round(roi, 1),
+        "hit_count": hit_count,
+        "race_count": race_count,
+        "bet_race_count": bet_race_count,
+        "details": details,
+    }
+
+
+# ─────────── Phase 4 multibet EV evaluation ───────────
+
+
+def _hjc_winning_combos(
+    hjc_row: dict,
+    bet_type: str,
+) -> list[tuple[frozenset | tuple, int]]:
+    """Extract winning combos + payouts for a bet_type from a single HJC row.
+
+    bet_type ∈ {"wide", "umatan", "sanrenpuku"}.
+    Returns: list of (combo, payout). For wide/sanrenpuku: combo = frozenset.
+    For umatan: combo = ordered tuple (1着, 2着).
+    """
+    out: list = []
+    if bet_type == "wide":
+        for i in range(1, 8):
+            combo_str = str(hjc_row.get(f"ワイド組合せ_{i}", "") or "").strip()
+            payout = hjc_row.get(f"ワイド払戻_{i}")
+            if combo_str and len(combo_str) == 4 and pd.notna(payout) and int(payout) > 0:
+                h1 = int(combo_str[:2])
+                h2 = int(combo_str[2:])
+                out.append((frozenset({h1, h2}), int(payout)))
+    elif bet_type == "umatan":
+        for i in range(1, 7):
+            combo_str = str(hjc_row.get(f"馬単組合せ_{i}", "") or "").strip()
+            payout = hjc_row.get(f"馬単払戻_{i}")
+            if combo_str and len(combo_str) == 4 and pd.notna(payout) and int(payout) > 0:
+                h1 = int(combo_str[:2])
+                h2 = int(combo_str[2:])
+                out.append(((h1, h2), int(payout)))
+    elif bet_type == "sanrenpuku":
+        for i in range(1, 4):
+            combo_str = str(hjc_row.get(f"三連複組合せ_{i}", "") or "").strip()
+            payout = hjc_row.get(f"三連複払戻_{i}")
+            if combo_str and len(combo_str) == 6 and pd.notna(payout) and int(payout) > 0:
+                h1 = int(combo_str[:2])
+                h2 = int(combo_str[2:4])
+                h3 = int(combo_str[4:6])
+                out.append((frozenset({h1, h2, h3}), int(payout)))
+    return out
+
+
+def _evaluate_multibet_ev(
+    predictions_df: pd.DataFrame,
+    hjc_df: pd.DataFrame,
+    race_odds_df: pd.DataFrame,
+    strategy: str,
+    ev_threshold: float,
+    max_bets_per_race: int = 20,
+) -> dict:
+    """Phase 4 EV strategy: pick combos with EV > threshold and check HJC payouts.
+
+    Strategy maps to bet_type:
+        ev_wide → wide
+        ev_umatan → umatan
+        ev_sanrenpuku_box → sanrenpuku
+    """
+    from src.predict.multibet import (
+        compute_sanrenpuku_ev,
+        compute_umatan_ev,
+        compute_wide_ev,
+    )
+
+    bet_type = {
+        "ev_wide": "wide",
+        "ev_umatan": "umatan",
+        "ev_sanrenpuku_box": "sanrenpuku",
+    }[strategy]
+    compute_fn = {
+        "wide": compute_wide_ev,
+        "umatan": compute_umatan_ev,
+        "sanrenpuku": compute_sanrenpuku_ev,
+    }[bet_type]
+
+    # Index race_odds by race_key for fast lookup
+    odds_lookup: dict[str, dict] = {}
+    if race_odds_df is not None and not race_odds_df.empty:
+        for _, row in race_odds_df.iterrows():
+            rk = row.get("race_key")
+            d = row.get(bet_type)
+            if rk and isinstance(d, dict) and d:
+                odds_lookup[str(rk)] = d
+
+    total_bets = 0
+    total_return = 0
+    hit_count = 0
+    race_count = 0
+    bet_race_count = 0
+    details = []
+
+    for race_key, group in predictions_df.groupby("race_key"):
+        race_count += 1
+        rk_str = str(race_key)
+        odds_dict = odds_lookup.get(rk_str)
+        if not odds_dict:
+            details.append({
+                "race_key": rk_str, "bet_horses": [],
+                "bets": 0, "return": 0, "hit": False,
+            })
+            continue
+
+        # Build prob_win vector — fall back to predict_prob/3 if prob_win missing
+        if "prob_win" in group.columns and group["prob_win"].notna().any():
+            prob_win = (
+                pd.to_numeric(group["prob_win"], errors="coerce")
+                .fillna(group["predict_prob"] / 3.0)
+                .tolist()
+            )
+        else:
+            prob_win = (group["predict_prob"] / 3.0).tolist()
+
+        horse_numbers = [int(h) for h in group["horse_number"].tolist()]
+        ev_table = compute_fn(horse_numbers, prob_win, odds_dict)
+        picks = [r for r in ev_table if r["ev"] > ev_threshold][:max_bets_per_race]
+        if not picks:
+            details.append({
+                "race_key": rk_str, "bet_horses": [],
+                "bets": 0, "return": 0, "hit": False,
+            })
+            continue
+
+        hjc_race = hjc_df[hjc_df["race_key"] == race_key]
+        if len(hjc_race) == 0:
+            continue
+        hjc_row = hjc_race.iloc[0].to_dict()
+        winners = _hjc_winning_combos(hjc_row, bet_type)
+
+        race_bets = len(picks) * 100
+        race_return = 0
+        race_hits = 0
+        for pick in picks:
+            combo = pick["combo"]
+            if bet_type == "umatan":
+                bet_combo = combo  # ordered tuple
+                for win_combo, payout in winners:
+                    if win_combo == bet_combo:
+                        race_return += payout
+                        race_hits += 1
+                        break
+            else:
+                bet_set = frozenset(combo)
+                for win_combo, payout in winners:
+                    if win_combo == bet_set:
+                        race_return += payout
+                        race_hits += 1
+                        break
+
+        total_bets += race_bets
+        total_return += race_return
+        hit_count += race_hits
+        bet_race_count += 1
+
+        details.append({
+            "race_key": rk_str,
+            "bet_horses": [list(p["combo"]) for p in picks],
+            "bets": race_bets,
+            "return": race_return,
+            "hit": race_return > 0,
+        })
+
+    roi = (total_return / total_bets * 100) if total_bets > 0 else 0.0
+    return {
+        "strategy": strategy,
         "ev_threshold": ev_threshold,
         "total_bets": total_bets,
         "total_return": total_return,

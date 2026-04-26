@@ -37,6 +37,33 @@ def _convert_weight(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _parse_body_weight_delta(df: pd.DataFrame) -> pd.DataFrame:
+    """Parse 枠確定馬体重増減 (e.g. '+05', '-08', '   ') into signed kg.
+
+    JRDB stores the delta as a 3-char string: sign + 2-digit magnitude.
+    Empty/whitespace is treated as missing → 0.0 (handled later by defaults).
+    """
+    df = df.copy()
+    src = df.get("枠確定馬体重増減")
+    if src is None:
+        return df
+
+    def _to_signed(val: object) -> float | None:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s or s in {"+", "-", "***"}:
+            return None
+        sign = -1.0 if s.startswith("-") else 1.0
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if not digits:
+            return None
+        return sign * float(digits)
+
+    df["body_weight_delta"] = src.map(_to_signed)
+    return df
+
+
 def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     """Fill missing values and cast types for ML features.
 
@@ -81,6 +108,9 @@ def build_training_features(
     kyi = _add_race_key(kyi_df)
     sed = _add_race_key(sed_df)
 
+    # Parse body_weight_delta before renaming (uses raw JRDB column name)
+    kyi = _parse_body_weight_delta(kyi)
+
     # Rename to feature names
     kyi = _rename_to_features(kyi)
     sed = _rename_to_features(sed)
@@ -113,15 +143,26 @@ def build_training_features(
     # Create is_place label
     merged[LABEL_COLUMN] = (merged["着順"] <= 3).astype(int)
 
+    # Phase 2: keep raw finish_order for lambdarank labels
+    merged["finish_order"] = pd.to_numeric(merged["着順"], errors="coerce")
+
     # Add derived features
     merged = add_derived_features(merged)
 
     # Preprocess
     merged = preprocess(merged)
 
-    # Select only feature columns + label
+    # Select feature columns + label + race_key + finish_order
+    # race_key / finish_order are preserved so Modal can compute per-race metrics
+    # (Hit@3 etc.) and lambdarank labels. Both are passed to AutoGluon via
+    # ignored_columns to avoid using them as features.
     available = [c for c in FEATURE_COLUMNS if c in merged.columns]
-    result = merged[available + [LABEL_COLUMN]].copy()
+    keep = available + [LABEL_COLUMN]
+    if "finish_order" in merged.columns:
+        keep = ["finish_order"] + keep
+    if "race_key" in merged.columns:
+        keep = ["race_key"] + keep
+    result = merged[keep].copy()
 
     return result
 
@@ -136,6 +177,7 @@ def build_prediction_features(kyi_df: pd.DataFrame) -> pd.DataFrame:
         DataFrame with FEATURE_COLUMNS (no label).
     """
     kyi = _add_race_key(kyi_df)
+    kyi = _parse_body_weight_delta(kyi)
     kyi = _rename_to_features(kyi)
     kyi = _convert_weight(kyi)
     kyi = add_derived_features(kyi)

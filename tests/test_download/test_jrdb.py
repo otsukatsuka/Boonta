@@ -64,7 +64,10 @@ class TestBuildURL:
 
 class TestFileTypes:
     def test_all_types_defined(self):
-        assert set(FILE_TYPES.keys()) == {"KYI", "SED", "HJC", "BAC"}
+        assert set(FILE_TYPES.keys()) == {
+            "KYI", "SED", "HJC", "BAC",
+            "OW", "OU", "OT", "CYB", "KKA",
+        }
 
     def test_invalid_type(self, downloader):
         with pytest.raises(ValueError, match="Unknown file type"):

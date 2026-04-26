@@ -1,11 +1,23 @@
 """JRDB fixed-length file parser."""
 from src.parser.bac import BAC_FIELDS
 from src.parser.bac import RECORD_LENGTH as BAC_RECORD_LENGTH
+from src.parser.cyb import CYB_FIELDS
+from src.parser.cyb import RECORD_LENGTH as CYB_RECORD_LENGTH
 from src.parser.engine import build_race_key, parse_file, parse_record
 from src.parser.hjc import HJC_FIELDS
 from src.parser.hjc import RECORD_LENGTH as HJC_RECORD_LENGTH
+from src.parser.kka import KKA_FIELDS
+from src.parser.kka import RECORD_LENGTH as KKA_RECORD_LENGTH
 from src.parser.kyi import KYI_FIELDS
 from src.parser.kyi import RECORD_LENGTH as KYI_RECORD_LENGTH
+from src.parser.odds import (
+    OT_RECORD_LENGTH,
+    OU_RECORD_LENGTH,
+    OW_RECORD_LENGTH,
+    parse_ot_file,
+    parse_ou_file,
+    parse_ow_file,
+)
 from src.parser.sed import RECORD_LENGTH as SED_RECORD_LENGTH
 from src.parser.sed import SED_FIELDS
 from src.parser.spec import FieldSpec, coerce
@@ -24,4 +36,14 @@ __all__ = [
     "HJC_RECORD_LENGTH",
     "BAC_FIELDS",
     "BAC_RECORD_LENGTH",
+    "OW_RECORD_LENGTH",
+    "OU_RECORD_LENGTH",
+    "OT_RECORD_LENGTH",
+    "parse_ow_file",
+    "parse_ou_file",
+    "parse_ot_file",
+    "CYB_FIELDS",
+    "CYB_RECORD_LENGTH",
+    "KKA_FIELDS",
+    "KKA_RECORD_LENGTH",
 ]

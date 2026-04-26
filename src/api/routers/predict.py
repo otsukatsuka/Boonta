@@ -12,13 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from src.api.deps import DbSession
+from src.api.routers.races import _horse_to_schema
 from src.api.schemas import (
-    Horse,
     PredictBatchItem,
     PredictBatchResponse,
     PredictResponse,
 )
-from src.api.routers.races import _horse_to_schema
 from src.db.models import HorseEntry, Prediction, Race
 from src.features.engineering import build_prediction_features
 from src.parser import KYI_FIELDS, KYI_RECORD_LENGTH
@@ -59,7 +58,11 @@ def _kyi_path_for(held_on: date) -> "tuple[Optional[object], str]":
 
 
 def _predict_one(session: Session, race: Race, model_version: str) -> tuple[int, str]:
-    """Run prediction for one race; upsert prediction rows. Returns (count, error)."""
+    """Run prediction for one race; upsert prediction rows. Returns (count, error).
+
+    Phase 2 extension: also call the lambdarank model (if deployed) to populate
+    ``prob_win``/``prob_top2``/``prob_top3``/``lambdarank_score``.
+    """
     from src.model.client import ModalClient
 
     path, err = _kyi_path_for(race.held_on)
@@ -87,6 +90,23 @@ def _predict_one(session: Session, race: Race, model_version: str) -> tuple[int,
     race_feats["ev_tan"] = (race_feats["prob"] / 3.0) * race_feats["odds_num"]
     race_feats["ev_fuku"] = race_feats["prob"] * race_feats["fuku_num"]
 
+    # Phase 2: optionally call lambdarank if the model is deployed.
+    lambdarank_payload: dict | None = None
+    try:
+        lambdarank_payload = client.predict_lambdarank(payload)
+        if not lambdarank_payload.get("success"):
+            lambdarank_payload = None
+    except Exception:
+        lambdarank_payload = None
+
+    if lambdarank_payload:
+        race_feats["lambdarank_score"] = lambdarank_payload.get("scores", [None] * len(race_feats))
+        race_feats["prob_win"] = lambdarank_payload.get("prob_win", [None] * len(race_feats))
+        race_feats["prob_top2"] = lambdarank_payload.get("prob_top2", [None] * len(race_feats))
+        # lambdarank's prob_top3 (PL-derived) is one option; AutoGluon's prob is
+        # already a calibrated top-3 prob — keep AutoGluon's in `prob_top3`.
+        race_feats["prob_top3"] = race_feats["prob"]
+
     now = datetime.utcnow()
     horses_by_no = {h.horse_number: h for h in race.horses}
 
@@ -97,28 +117,37 @@ def _predict_one(session: Session, race: Race, model_version: str) -> tuple[int,
         if horse is None:
             continue
 
-        ev_tan = row["ev_tan"]
-        ev_fuku = row["ev_fuku"]
+        def _opt(col: str) -> float | None:
+            val = row.get(col)
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return None
+            return float(val)
+
         pred = session.scalar(
             select(Prediction).where(
                 Prediction.horse_entry_id == horse.id,
                 Prediction.model_version == model_version,
             )
         )
+        kwargs = {
+            "prob": float(row["prob"]),
+            "ev_tan": _opt("ev_tan"),
+            "ev_fuku": _opt("ev_fuku"),
+            "prob_win": _opt("prob_win"),
+            "prob_top2": _opt("prob_top2"),
+            "prob_top3": _opt("prob_top3"),
+            "lambdarank_score": _opt("lambdarank_score"),
+            "predicted_at": now,
+        }
         if pred is None:
             session.add(Prediction(
                 horse_entry_id=horse.id,
                 model_version=model_version,
-                prob=float(row["prob"]),
-                ev_tan=None if pd.isna(ev_tan) else float(ev_tan),
-                ev_fuku=None if pd.isna(ev_fuku) else float(ev_fuku),
-                predicted_at=now,
+                **kwargs,
             ))
         else:
-            pred.prob = float(row["prob"])
-            pred.ev_tan = None if pd.isna(ev_tan) else float(ev_tan)
-            pred.ev_fuku = None if pd.isna(ev_fuku) else float(ev_fuku)
-            pred.predicted_at = now
+            for k, v in kwargs.items():
+                setattr(pred, k, v)
         written += 1
 
     return written, ""
@@ -161,6 +190,124 @@ def predict_race(race_key: str, session: DbSession) -> PredictResponse:
         model_version=model_version,
         predicted_at=predicted_at,
         elapsed_ms=elapsed_ms,
+    )
+
+
+class MultibetQuery(BaseModel):
+    ev_threshold: float = 1.10
+    max_bets: int = 10
+
+
+class MultibetPick(BaseModel):
+    key: str
+    combo: list[int] | None = None
+    horse: int | None = None
+    prob: float
+    odds: float
+    ev: float
+
+
+class MultibetResponse(BaseModel):
+    race_key: str
+    ev_threshold: float
+    tan: list[MultibetPick]
+    fuku: list[MultibetPick]
+    wide: list[MultibetPick]
+    umatan: list[MultibetPick]
+    sanrenpuku: list[MultibetPick]
+
+
+def _row_to_pick(r: dict) -> MultibetPick:
+    return MultibetPick(
+        key=str(r.get("key") or r.get("horse")),
+        combo=list(r["combo"]) if "combo" in r else None,
+        horse=int(r["horse"]) if "horse" in r else None,
+        prob=float(r["prob"]),
+        odds=float(r["odds"]),
+        ev=float(r["ev"]),
+    )
+
+
+@router.get("/{race_key}/multibet", response_model=MultibetResponse)
+def race_multibet(
+    race_key: str,
+    session: DbSession,
+    ev_threshold: float = 1.10,
+    max_bets: int = 10,
+) -> MultibetResponse:
+    """Phase 4 multibet EVs (single/place/wide/umatan/sanrenpuku) for a race.
+
+    Reads pre-race odds (from race_odds, ingested via OW/OU/OT) and the
+    latest predictions (prob_win from lambdarank if available; falls back to
+    prob/3 from AutoGluon)."""
+    from src.db.models import HorseEntry, RaceOdds
+    from src.predict.multibet import (
+        compute_fuku_ev,
+        compute_sanrenpuku_ev,
+        compute_tan_ev,
+        compute_umatan_ev,
+        compute_wide_ev,
+        recommend_threshold,
+    )
+
+    race = session.scalar(
+        select(Race)
+        .where(Race.race_key == race_key)
+        .options(selectinload(Race.horses).selectinload(HorseEntry.predictions))
+    )
+    if race is None:
+        raise HTTPException(status_code=404, detail=f"Race not found: {race_key}")
+
+    horses = sorted(race.horses, key=lambda h: h.horse_number)
+    horse_numbers = [int(h.horse_number) for h in horses]
+    odds_tan = {int(h.horse_number): float(h.odds) for h in horses if h.odds}
+    odds_fuku = {
+        int(h.horse_number): float(h.fukusho_odds)
+        for h in horses if h.fukusho_odds
+    }
+
+    prob_win: list[float] = []
+    prob_top3: list[float] = []
+    for h in horses:
+        preds = sorted(h.predictions, key=lambda p: p.predicted_at, reverse=True)
+        latest = preds[0] if preds else None
+        if latest is None:
+            prob_win.append(0.0)
+            prob_top3.append(0.0)
+        else:
+            pw = latest.prob_win if latest.prob_win is not None else (latest.prob / 3.0)
+            pt3 = latest.prob_top3 if latest.prob_top3 is not None else latest.prob
+            prob_win.append(float(pw))
+            prob_top3.append(float(pt3))
+
+    odds_row = session.scalar(
+        select(RaceOdds).where(RaceOdds.race_id == race.id)
+    )
+
+    tan = compute_tan_ev(horse_numbers, prob_win, odds_tan)
+    fuku = compute_fuku_ev(horse_numbers, prob_top3, odds_fuku)
+    wide_picks: list[dict] = []
+    umatan_picks: list[dict] = []
+    sanren_picks: list[dict] = []
+    if odds_row is not None:
+        if odds_row.wide:
+            wide_picks = compute_wide_ev(horse_numbers, prob_win, odds_row.wide)
+        if odds_row.umatan:
+            umatan_picks = compute_umatan_ev(horse_numbers, prob_win, odds_row.umatan)
+        if odds_row.sanrenpuku:
+            sanren_picks = compute_sanrenpuku_ev(horse_numbers, prob_win, odds_row.sanrenpuku)
+
+    def _picks(rows: list[dict]) -> list[MultibetPick]:
+        return [_row_to_pick(r) for r in recommend_threshold(rows, ev_threshold, max_bets)]
+
+    return MultibetResponse(
+        race_key=race_key,
+        ev_threshold=ev_threshold,
+        tan=_picks(tan),
+        fuku=_picks(fuku),
+        wide=_picks(wide_picks),
+        umatan=_picks(umatan_picks),
+        sanrenpuku=_picks(sanren_picks),
     )
 
 

@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from src.db.models import (
     BacktestDetail,
@@ -20,6 +20,7 @@ from src.db.models import (
     HorseEntry,
     Prediction,
     Race,
+    RaceOdds,
 )
 from src.predict.roi import evaluate_roi
 
@@ -30,9 +31,23 @@ STRATEGIES: list[str] = [
     "ev_tansho",
     "ev_fukusho",
     "ev_sanrenpuku_nagashi",
+    # Phase 4 — multibet EV (Plackett-Luce + pre-race combination odds)
+    "ev_wide",
+    "ev_umatan",
+    "ev_sanrenpuku_box",
 ]
 
-EV_STRATEGIES: set[str] = {"ev_tansho", "ev_fukusho", "ev_sanrenpuku_nagashi"}
+EV_STRATEGIES: set[str] = {
+    "ev_tansho",
+    "ev_fukusho",
+    "ev_sanrenpuku_nagashi",
+    "ev_wide",
+    "ev_umatan",
+    "ev_sanrenpuku_box",
+}
+
+# Strategies that require pre-race combination odds (race_odds_df)
+MULTIBET_STRATEGIES: set[str] = {"ev_wide", "ev_umatan", "ev_sanrenpuku_box"}
 
 # Sensitivity sweep: 0.80 → 1.50 step 0.05 (matches TweaksPanel slider).
 SENSITIVITY_THRESHOLDS: list[float] = [round(0.80 + 0.05 * i, 2) for i in range(15)]
@@ -59,6 +74,7 @@ def load_predictions_df(
             HorseEntry.odds,
             HorseEntry.fukusho_odds,
             Prediction.prob,
+            Prediction.prob_win,
             Prediction.model_version,
         )
         .join(HorseEntry, HorseEntry.race_id == Race.id)
@@ -71,13 +87,42 @@ def load_predictions_df(
     rows = session.execute(stmt).all()
     if not rows:
         return pd.DataFrame(
-            columns=["race_key", "horse_number", "predict_prob", "odds", "fukusho_odds", "held_on"]
+            columns=[
+                "race_key", "horse_number", "predict_prob", "prob_win",
+                "odds", "fukusho_odds", "held_on",
+            ]
         )
     df = pd.DataFrame(rows, columns=[
         "race_key", "held_on", "horse_number", "odds", "fukusho_odds",
-        "predict_prob", "model_version",
+        "predict_prob", "prob_win", "model_version",
     ])
     return df
+
+
+def load_race_odds_df(
+    session: Session,
+    date_from: date,
+    date_to: date,
+) -> pd.DataFrame:
+    """Pre-race combination odds (OW/OU/OT) for races in the date range."""
+    rows = session.execute(
+        select(
+            Race.race_key,
+            RaceOdds.head_count,
+            RaceOdds.wide,
+            RaceOdds.umatan,
+            RaceOdds.sanrenpuku,
+        )
+        .join(RaceOdds, RaceOdds.race_id == Race.id)
+        .where(Race.held_on.between(date_from, date_to))
+    ).all()
+    if not rows:
+        return pd.DataFrame(
+            columns=["race_key", "head_count", "wide", "umatan", "sanrenpuku"]
+        )
+    return pd.DataFrame(rows, columns=[
+        "race_key", "head_count", "wide", "umatan", "sanrenpuku",
+    ])
 
 
 def load_hjc_df(session: Session, date_from: date, date_to: date) -> pd.DataFrame:
@@ -238,11 +283,19 @@ def run_backtest(
     )
 
     thr = ev_threshold if strategy in EV_STRATEGIES else None
+    race_odds_df = None
+    if strategy in MULTIBET_STRATEGIES:
+        race_odds_df = load_race_odds_df(session, date_from, date_to)
+        if race_odds_df.empty:
+            raise ValueError(
+                f"Strategy {strategy} requires race_odds; ingest OW/OU/OT first"
+            )
     result = evaluate_roi(
         preds_df,
         hjc_df,
         strategy=strategy,
         ev_threshold=thr if thr is not None else 1.0,
+        race_odds_df=race_odds_df,
     )
 
     return _persist_run(
@@ -273,9 +326,19 @@ def run_sensitivity_sweep(
     session.execute(delete(BacktestSensitivity).where(BacktestSensitivity.run_id == run.id))
     session.flush()
 
+    race_odds_df = None
+    if run.strategy in MULTIBET_STRATEGIES:
+        race_odds_df = load_race_odds_df(session, run.date_from, run.date_to)
+
     written = 0
     for thr in thresholds:
-        res = evaluate_roi(preds_df, hjc_df, strategy=run.strategy, ev_threshold=thr)
+        res = evaluate_roi(
+            preds_df,
+            hjc_df,
+            strategy=run.strategy,
+            ev_threshold=thr,
+            race_odds_df=race_odds_df,
+        )
         session.add(BacktestSensitivity(
             run_id=run.id,
             ev_threshold=thr,

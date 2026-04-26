@@ -33,25 +33,25 @@ class TestPreprocessFeatures:
         assert result["pace_forecast"].iloc[0] == "H"
 
     def test_all_numerical_defaults_covered(self):
-        """Every numerical feature has a default."""
-        expected_keys = {
-            "idm", "jockey_index", "info_index", "overall_index",
-            "training_index", "stable_index", "ten_index", "pace_index",
-            "agari_index", "position_index", "odds", "popularity",
-            "horse_number", "waku", "weight_carried",
-            "mid_position", "mid_gap", "mid_position_io",
-            "late3f_position", "late3f_gap", "late3f_io",
-            "goal_position", "goal_gap", "goal_io",
-            "start_index", "gate_miss_rate", "upset_index",
-            "speed_balance", "position_delta", "io_shift",
-            "log_odds", "risk_score", "race_head_count",
-        }
-        assert set(NUMERICAL_DEFAULTS.keys()) == expected_keys
+        """Every non-categorical FEATURE_COLUMNS entry has a NUMERICAL_DEFAULT.
+
+        Derived dynamically from src/features/columns.py so adding a feature
+        there forces it to appear here too (no hardcoded list to update).
+        """
+        from src.features.columns import (
+            CATEGORICAL_FEATURES,
+            FEATURE_COLUMNS,
+        )
+
+        expected_numeric = {c for c in FEATURE_COLUMNS if c not in CATEGORICAL_FEATURES}
+        missing = expected_numeric - set(NUMERICAL_DEFAULTS.keys())
+        assert not missing, f"Missing defaults for: {sorted(missing)}"
 
     def test_categorical_cols_match(self):
-        expected = ["pace_forecast", "tenkai_symbol", "running_style",
-                    "distance_aptitude", "heavy_track_code"]
-        assert CATEGORICAL_COLS == expected
+        """Modal CATEGORICAL_COLS must match src/features/columns.py."""
+        from src.features.columns import CATEGORICAL_FEATURES as SRC_CATS
+
+        assert CATEGORICAL_COLS == SRC_CATS
 
     def test_does_not_modify_original(self):
         df = pd.DataFrame({"idm": [None]})

@@ -9,7 +9,14 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import HjcPayout, HorseEntry, Race
+from src.db.models import (
+    CybRecord,
+    HjcPayout,
+    HorseEntry,
+    KkaRecord,
+    Race,
+    RaceOdds,
+)
 from src.parser.engine import build_race_key
 
 
@@ -279,6 +286,174 @@ def ingest_bac(session: Session, df: pd.DataFrame, held_on: date) -> int:
 
         race.source = _merge_source(race.source, "BAC")
         race.ingested_at = now
+        touched += 1
+
+    return touched
+
+
+def ingest_race_odds(
+    session: Session,
+    df: pd.DataFrame,
+    bet_type: str,
+) -> int:
+    """Upsert pre-race combination odds (OW/OU/OT) into race_odds.
+
+    df columns: race_key, head_count, bet_type, odds (dict[combo→float|None]).
+    bet_type controls which JSON column gets filled: wide / umatan / sanrenpuku.
+    """
+    if df.empty or bet_type not in {"wide", "umatan", "sanrenpuku"}:
+        return 0
+
+    now = datetime.utcnow()
+    touched = 0
+
+    for _, row in df.iterrows():
+        race_key = row.get("race_key")
+        if not race_key:
+            continue
+        race = session.scalar(select(Race).where(Race.race_key == race_key))
+        if race is None:
+            # Race must exist (BAC/KYI ingested first); skip orphans
+            continue
+
+        odds_dict = row.get("odds") or {}
+        # Drop None values to keep JSON compact
+        clean = {k: v for k, v in odds_dict.items() if v is not None}
+
+        existing = session.scalar(
+            select(RaceOdds).where(RaceOdds.race_id == race.id)
+        )
+        head_count = _to_int(row.get("head_count"))
+        if existing is None:
+            kwargs = {
+                "race_id": race.id,
+                "head_count": head_count,
+                "ingested_at": now,
+                "wide": None,
+                "umatan": None,
+                "sanrenpuku": None,
+            }
+            kwargs[bet_type] = clean or None
+            session.add(RaceOdds(**kwargs))
+        else:
+            setattr(existing, bet_type, clean or None)
+            if head_count is not None:
+                existing.head_count = head_count
+            existing.ingested_at = now
+        touched += 1
+
+    return touched
+
+
+def ingest_cyb(session: Session, df: pd.DataFrame, held_on: date) -> int:
+    """Upsert CYB (training analysis) by (race_key, 馬番) → horse_entry."""
+    if df.empty:
+        return 0
+    df = df.copy()
+    df["race_key"] = df.apply(lambda r: build_race_key(r.to_dict()), axis=1)
+    now = datetime.utcnow()
+    touched = 0
+
+    for _, row in df.iterrows():
+        race_key = row["race_key"]
+        umaban = _to_int(row.get("馬番"))
+        if not race_key or umaban is None:
+            continue
+        race = session.scalar(select(Race).where(Race.race_key == race_key))
+        if race is None:
+            continue
+        horse = session.scalar(
+            select(HorseEntry).where(
+                HorseEntry.race_id == race.id,
+                HorseEntry.horse_number == umaban,
+            )
+        )
+        if horse is None:
+            continue
+
+        raw_dict: dict = {}
+        for col, val in row.items():
+            if col == "race_key":
+                continue
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                raw_dict[col] = None
+            elif isinstance(val, (int, float, str, bool)):
+                raw_dict[col] = val
+            else:
+                raw_dict[col] = str(val)
+
+        existing = session.scalar(
+            select(CybRecord).where(CybRecord.horse_entry_id == horse.id)
+        )
+        if existing is None:
+            session.add(CybRecord(
+                horse_entry_id=horse.id,
+                finish_index=_to_int(row.get("仕上指数")),
+                chase_index=_to_int(row.get("追切指数")),
+                training_eval=_to_str(row.get("調教評価")),
+                raw=raw_dict,
+                ingested_at=now,
+            ))
+        else:
+            existing.finish_index = _to_int(row.get("仕上指数"))
+            existing.chase_index = _to_int(row.get("追切指数"))
+            existing.training_eval = _to_str(row.get("調教評価"))
+            existing.raw = raw_dict
+            existing.ingested_at = now
+        touched += 1
+
+    return touched
+
+
+def ingest_kka(session: Session, df: pd.DataFrame, held_on: date) -> int:
+    """Upsert KKA (extended past-race) by (race_key, 馬番) → horse_entry."""
+    if df.empty:
+        return 0
+    df = df.copy()
+    df["race_key"] = df.apply(lambda r: build_race_key(r.to_dict()), axis=1)
+    now = datetime.utcnow()
+    touched = 0
+
+    for _, row in df.iterrows():
+        race_key = row["race_key"]
+        umaban = _to_int(row.get("馬番"))
+        if not race_key or umaban is None:
+            continue
+        race = session.scalar(select(Race).where(Race.race_key == race_key))
+        if race is None:
+            continue
+        horse = session.scalar(
+            select(HorseEntry).where(
+                HorseEntry.race_id == race.id,
+                HorseEntry.horse_number == umaban,
+            )
+        )
+        if horse is None:
+            continue
+
+        raw_dict: dict = {}
+        for col, val in row.items():
+            if col == "race_key":
+                continue
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                raw_dict[col] = None
+            elif isinstance(val, (int, float, str, bool)):
+                raw_dict[col] = val
+            else:
+                raw_dict[col] = str(val)
+
+        existing = session.scalar(
+            select(KkaRecord).where(KkaRecord.horse_entry_id == horse.id)
+        )
+        if existing is None:
+            session.add(KkaRecord(
+                horse_entry_id=horse.id,
+                raw=raw_dict,
+                ingested_at=now,
+            ))
+        else:
+            existing.raw = raw_dict
+            existing.ingested_at = now
         touched += 1
 
     return touched

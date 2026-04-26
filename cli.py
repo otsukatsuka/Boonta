@@ -181,97 +181,110 @@ def db_init():
     click.echo(f"DB ready: {db_path(settings)}")
 
 
-@db.command("ingest")
-@click.option("--type", "file_type", required=True,
-              type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
-@click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
-def db_ingest(file_type: str, date_str: str):
-    """Ingest a single day's parsed JRDB file into the DB."""
+_INGEST_TYPES = ["KYI", "SED", "HJC", "BAC", "OW", "OU", "OT", "CYB", "KKA"]
+
+
+def _ingest_one(session, file_type: str, date_str: str, settings) -> tuple[int, int, "date | None"]:
+    """Run one parser+ingester for ``file_type`` / ``date_str``.
+
+    Returns ``(records, touched, held_on)``. Returns ``(0, 0, None)`` when the
+    raw file is missing.
+    """
     from src.db.ingest import (
         held_on_from_filename,
         ingest_bac,
+        ingest_cyb,
         ingest_hjc,
+        ingest_kka,
         ingest_kyi,
+        ingest_race_odds,
         ingest_sed,
     )
-    from src.db.session import session_scope
     from src.parser import (
         BAC_FIELDS,
         BAC_RECORD_LENGTH,
+        CYB_FIELDS,
+        CYB_RECORD_LENGTH,
         HJC_FIELDS,
         HJC_RECORD_LENGTH,
+        KKA_FIELDS,
+        KKA_RECORD_LENGTH,
         KYI_FIELDS,
         KYI_RECORD_LENGTH,
         SED_FIELDS,
         SED_RECORD_LENGTH,
+        parse_ot_file,
+        parse_ou_file,
+        parse_ow_file,
     )
     from src.parser.engine import parse_file
 
-    settings = Settings()
-    spec = {
-        "KYI": (KYI_FIELDS, KYI_RECORD_LENGTH, ingest_kyi),
-        "SED": (SED_FIELDS, SED_RECORD_LENGTH, ingest_sed),
-        "HJC": (HJC_FIELDS, HJC_RECORD_LENGTH, ingest_hjc),
-        "BAC": (BAC_FIELDS, BAC_RECORD_LENGTH, ingest_bac),
-    }
-    fields, rec_len, ingest_fn = spec[file_type]
     path = settings.data_raw_dir / f"{file_type}{date_str}.txt"
     if not path.exists():
+        return 0, 0, None
+    held_on = held_on_from_filename(path)
+
+    if file_type in ("KYI", "SED", "BAC", "HJC", "CYB", "KKA"):
+        fields, rec_len, fn = {
+            "KYI": (KYI_FIELDS, KYI_RECORD_LENGTH, ingest_kyi),
+            "SED": (SED_FIELDS, SED_RECORD_LENGTH, ingest_sed),
+            "BAC": (BAC_FIELDS, BAC_RECORD_LENGTH, ingest_bac),
+            "HJC": (HJC_FIELDS, HJC_RECORD_LENGTH, ingest_hjc),
+            "CYB": (CYB_FIELDS, CYB_RECORD_LENGTH, ingest_cyb),
+            "KKA": (KKA_FIELDS, KKA_RECORD_LENGTH, ingest_kka),
+        }[file_type]
+        df = parse_file(path, fields, rec_len)
+        touched = fn(session, df, held_on)
+        return len(df), touched, held_on
+
+    # Odds files — separate parsers, share ingest_race_odds with bet_type.
+    odds_spec = {
+        "OW": (parse_ow_file, "wide"),
+        "OU": (parse_ou_file, "umatan"),
+        "OT": (parse_ot_file, "sanrenpuku"),
+    }
+    parser_fn, bet_type = odds_spec[file_type]
+    df = parser_fn(path)
+    touched = ingest_race_odds(session, df, bet_type)
+    return len(df), touched, held_on
+
+
+@db.command("ingest")
+@click.option("--type", "file_type", required=True, type=click.Choice(_INGEST_TYPES))
+@click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
+def db_ingest(file_type: str, date_str: str):
+    """Ingest a single day's parsed JRDB file into the DB."""
+    from src.db.session import session_scope
+
+    settings = Settings()
+    with session_scope() as session:
+        records, touched, held_on = _ingest_one(session, file_type, date_str, settings)
+    if held_on is None:
+        path = settings.data_raw_dir / f"{file_type}{date_str}.txt"
         click.echo(f"File not found: {path}", err=True)
         raise click.exceptions.Exit(1)
-
-    held_on = held_on_from_filename(path)
-    df = parse_file(path, fields, rec_len)
-    with session_scope() as session:
-        touched = ingest_fn(session, df, held_on)
-    click.echo(f"{file_type} {date_str} ({held_on}): {len(df)} records → {touched} races")
+    click.echo(f"{file_type} {date_str} ({held_on}): {records} records → {touched} touched")
 
 
 @db.command("ingest-all")
 @click.option("--date", "date_str", required=True, help="Date in YYMMDD format")
 def db_ingest_all(date_str: str):
-    """Ingest BAC + KYI + SED + HJC for a single day (in order, missing ones skipped)."""
-    from src.db.ingest import (
-        held_on_from_filename,
-        ingest_bac,
-        ingest_hjc,
-        ingest_kyi,
-        ingest_sed,
-    )
+    """Ingest BAC + KYI + SED + HJC + OW + OU + OT + CYB + KKA for a day (missing skipped)."""
     from src.db.session import session_scope
-    from src.parser import (
-        BAC_FIELDS,
-        BAC_RECORD_LENGTH,
-        HJC_FIELDS,
-        HJC_RECORD_LENGTH,
-        KYI_FIELDS,
-        KYI_RECORD_LENGTH,
-        SED_FIELDS,
-        SED_RECORD_LENGTH,
-    )
-    from src.parser.engine import parse_file
 
     settings = Settings()
-    pipeline = [
-        ("BAC", BAC_FIELDS, BAC_RECORD_LENGTH, ingest_bac),
-        ("KYI", KYI_FIELDS, KYI_RECORD_LENGTH, ingest_kyi),
-        ("SED", SED_FIELDS, SED_RECORD_LENGTH, ingest_sed),
-        ("HJC", HJC_FIELDS, HJC_RECORD_LENGTH, ingest_hjc),
-    ]
+    pipeline = ["BAC", "KYI", "SED", "HJC", "OW", "OU", "OT", "CYB", "KKA"]
     with session_scope() as session:
-        for ft, fields, rec_len, ingest_fn in pipeline:
-            path = settings.data_raw_dir / f"{ft}{date_str}.txt"
-            if not path.exists():
+        for ft in pipeline:
+            records, touched, held_on = _ingest_one(session, ft, date_str, settings)
+            if held_on is None:
                 click.echo(f"  skip {ft}: not found")
-                continue
-            held_on = held_on_from_filename(path)
-            df = parse_file(path, fields, rec_len)
-            touched = ingest_fn(session, df, held_on)
-            click.echo(f"  {ft}: {len(df)} rec → {touched} races (held_on={held_on})")
+            else:
+                click.echo(f"  {ft}: {records} rec → {touched} touched (held_on={held_on})")
 
 
 @cli.command()
-@click.option("--type", "file_type", required=True, type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
+@click.option("--type", "file_type", required=True, type=click.Choice(["KYI", "SED", "HJC", "BAC", "OW", "OU", "OT", "CYB", "KKA"]))
 @click.option("--date", "date_str", help="Date in YYMMDD format (e.g. 260405)")
 @click.option(
     "--date-range", "date_range", nargs=2,
@@ -300,7 +313,7 @@ def download(file_type: str, date_str: str | None, date_range: tuple[str, str] |
 
 
 @cli.command()
-@click.option("--type", "file_type", type=click.Choice(["KYI", "SED", "HJC", "BAC"]))
+@click.option("--type", "file_type", type=click.Choice(["KYI", "SED", "HJC", "BAC", "OW", "OU", "OT", "CYB", "KKA"]))
 @click.option("--date", "date_str", help="Date in YYMMDD format")
 @click.option("--all", "parse_all", is_flag=True, help="Parse all files in data/raw/")
 def parse(file_type: str | None, date_str: str | None, parse_all: bool):
@@ -346,8 +359,20 @@ def parse(file_type: str | None, date_str: str | None, parse_all: bool):
 
 @cli.command()
 @click.option("--date-range", nargs=2, required=True, help="Start and end dates (YYYYMMDD)")
-@click.option("--time-limit", default=1800, help="Training time limit in seconds")
-def train(date_range: tuple[str, str], time_limit: int):
+@click.option("--time-limit", default=7200, help="AutoGluon training time limit in seconds")
+@click.option(
+    "--model-type",
+    type=click.Choice(["autogluon", "lambdarank", "both"]),
+    default="autogluon",
+    help="autogluon = is_place binary, lambdarank = per-race ranker, both = train both",
+)
+@click.option("--lambdarank-rounds", default=3000, help="LightGBM num_boost_round")
+def train(
+    date_range: tuple[str, str],
+    time_limit: int,
+    model_type: str,
+    lambdarank_rounds: int,
+):
     """Train ML model from KYI + SED data."""
     from src.features.engineering import build_training_features
     from src.model.client import ModalClient
@@ -383,17 +408,39 @@ def train(date_range: tuple[str, str], time_limit: int):
     click.echo(f"Training data: {len(training_df)} samples, {len(training_df.columns)} features")
 
     csv_data = training_df.to_csv(index=False)
-
-    click.echo(f"Sending to Modal for training (time_limit={time_limit}s)...")
     client = ModalClient()
-    result = client.train(csv_data, time_limit=time_limit)
 
-    if result.get("success"):
-        click.echo(f"Training complete! Best score: {result.get('best_score')}")
-        click.echo(f"Best model: {result.get('best_model')}")
-        _record_training_run(result, time_limit=time_limit)
-    else:
-        click.echo(f"Training failed: {result.get('error')}")
+    if model_type in {"autogluon", "both"}:
+        click.echo(f"Training AutoGluon (time_limit={time_limit}s)...")
+        result = client.train(csv_data, time_limit=time_limit)
+        if result.get("success"):
+            click.echo(
+                f"AutoGluon done. Best AUC: {result.get('best_score')} "
+                f"({result.get('best_model')}); Brier={result.get('brier')} "
+                f"Hit@3={result.get('hit_at_3')} ECE={result.get('ece')}"
+            )
+            _record_training_run(result, time_limit=time_limit)
+        else:
+            click.echo(f"AutoGluon training failed: {result.get('error')}")
+            if model_type == "autogluon":
+                return
+
+    if model_type in {"lambdarank", "both"}:
+        click.echo(f"Training LightGBM lambdarank (num_boost_round={lambdarank_rounds})...")
+        rank_result = client.train_lambdarank(
+            csv_data,
+            num_boost_round=lambdarank_rounds,
+        )
+        if rank_result.get("success"):
+            click.echo(
+                f"Lambdarank done. best_iter={rank_result.get('best_iteration')} "
+                f"ndcg@3={rank_result.get('validation_ndcg_at_3')} "
+                f"hit@1={rank_result.get('validation_hit_at_1')} "
+                f"T={rank_result.get('optimal_temperature')} "
+                f"NLL={rank_result.get('validation_nll')}"
+            )
+        else:
+            click.echo(f"Lambdarank training failed: {rank_result.get('error')}")
 
 
 def _record_training_run(result: dict, time_limit: int) -> None:
@@ -446,8 +493,9 @@ def _record_training_run(result: dict, time_limit: int) -> None:
                 preset=result.get("presets_used") or settings.autogluon_presets,
                 logloss=logloss_val,
                 auc=auc_val,
-                brier=None,
-                hit_at_3=None,
+                brier=result.get("brier"),
+                hit_at_3=result.get("hit_at_3"),
+                ece=result.get("ece"),
                 train_time_seconds=result.get("train_time_seconds"),
                 num_samples=result.get("num_samples"),
                 status="DEPLOYED",
@@ -651,6 +699,123 @@ def _parse_files(settings: Settings, fields: list, rec_len: int, prefix: str, ft
         out = settings.data_processed_dir / f"{prefix.lower()}.csv"
         combined.to_csv(out, index=False)
         click.echo(f"  Combined → {out} ({len(combined)} total records)")
+
+
+@cli.command()
+@click.option("--race-key", "race_key", required=True, help="Race key (e.g. 0526010101)")
+@click.option("--ev-threshold", type=float, default=1.10,
+              help="Minimum EV for recommended picks (default 1.10)")
+@click.option("--max-bets", type=int, default=10,
+              help="Cap on bets shown per bet type")
+def multibet(race_key: str, ev_threshold: float, max_bets: int):
+    """Show multibet EV table + recommended picks for one race.
+
+    Requires:
+      * Race ingested (BAC/KYI) so HorseEntry rows exist
+      * Pre-race odds ingested (OW/OU/OT) for combination EV
+      * Predictions stored (prob from AutoGluon, prob_win from lambdarank)
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from src.db.models import HorseEntry, Prediction, Race, RaceOdds
+    from src.db.session import session_scope
+    from src.predict.multibet import (
+        compute_fuku_ev,
+        compute_sanrenpuku_ev,
+        compute_tan_ev,
+        compute_umatan_ev,
+        compute_wide_ev,
+        recommend_threshold,
+    )
+
+    with session_scope() as session:
+        race = session.scalar(
+            select(Race)
+            .where(Race.race_key == race_key)
+            .options(selectinload(Race.horses).selectinload(HorseEntry.predictions))
+        )
+        if race is None:
+            click.echo(f"Race not found: {race_key}", err=True)
+            raise click.exceptions.Exit(1)
+
+        odds_row = session.scalar(
+            select(RaceOdds).where(RaceOdds.race_id == race.id)
+        )
+        horses = sorted(race.horses, key=lambda h: h.horse_number)
+        if not horses:
+            click.echo(f"No horses for race {race_key}", err=True)
+            raise click.exceptions.Exit(1)
+
+        horse_numbers = [int(h.horse_number) for h in horses]
+        odds_tan = {int(h.horse_number): float(h.odds) for h in horses if h.odds}
+        odds_fuku = {int(h.horse_number): float(h.fukusho_odds) for h in horses if h.fukusho_odds}
+
+        # Pull latest prediction per horse — prefer prob_win from lambdarank model
+        prob_win: list[float] = []
+        prob_top3: list[float] = []
+        for h in horses:
+            preds = sorted(h.predictions, key=lambda p: p.predicted_at, reverse=True)
+            latest = preds[0] if preds else None
+            if latest is None:
+                prob_win.append(0.0)
+                prob_top3.append(0.0)
+                continue
+            pw = latest.prob_win if latest.prob_win is not None else (latest.prob / 3.0)
+            pt3 = latest.prob_top3 if latest.prob_top3 is not None else latest.prob
+            prob_win.append(float(pw))
+            prob_top3.append(float(pt3))
+
+        click.echo(f"Race: {race_key} ({race.held_on}) — {len(horses)} horses")
+
+        # Tan/fuku
+        tan = compute_tan_ev(horse_numbers, prob_win, odds_tan)
+        click.echo("\n[単勝 EV >= threshold]")
+        for r in recommend_threshold(tan, ev_threshold, max_bets):
+            click.echo(
+                f"  ⛬ horse={r['horse']:2d} prob={r['prob']:.3f} "
+                f"odds={r['odds']:.1f} ev={r['ev']:.3f}"
+            )
+
+        fuku = compute_fuku_ev(horse_numbers, prob_top3, odds_fuku)
+        click.echo("\n[複勝 EV >= threshold]")
+        for r in recommend_threshold(fuku, ev_threshold, max_bets):
+            click.echo(
+                f"  ⛬ horse={r['horse']:2d} prob={r['prob']:.3f} "
+                f"odds={r['odds']:.1f} ev={r['ev']:.3f}"
+            )
+
+        # Combination odds — only if ingested
+        if odds_row is None:
+            click.echo("\n(No race_odds — ingest OW/OU/OT to see combination EVs)")
+            return
+
+        if odds_row.wide:
+            wide = compute_wide_ev(horse_numbers, prob_win, odds_row.wide)
+            click.echo("\n[ワイド EV >= threshold]")
+            for r in recommend_threshold(wide, ev_threshold, max_bets):
+                click.echo(
+                    f"  ⛬ {r['key']} prob={r['prob']:.3f} "
+                    f"odds={r['odds']:.1f} ev={r['ev']:.3f}"
+                )
+
+        if odds_row.umatan:
+            um = compute_umatan_ev(horse_numbers, prob_win, odds_row.umatan)
+            click.echo("\n[馬単 EV >= threshold]")
+            for r in recommend_threshold(um, ev_threshold, max_bets):
+                click.echo(
+                    f"  ⛬ {r['key']} prob={r['prob']:.3f} "
+                    f"odds={r['odds']:.1f} ev={r['ev']:.3f}"
+                )
+
+        if odds_row.sanrenpuku:
+            sp = compute_sanrenpuku_ev(horse_numbers, prob_win, odds_row.sanrenpuku)
+            click.echo("\n[三連複 EV >= threshold]")
+            for r in recommend_threshold(sp, ev_threshold, max_bets):
+                click.echo(
+                    f"  ⛬ {r['key']} prob={r['prob']:.3f} "
+                    f"odds={r['odds']:.1f} ev={r['ev']:.3f}"
+                )
 
 
 if __name__ == "__main__":

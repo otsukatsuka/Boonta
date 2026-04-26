@@ -16,6 +16,12 @@ FILE_TYPES = {
     "SED": ("Sed/", "zip", "SED"),
     "HJC": ("Hjc/", "zip", "HJC"),
     "BAC": ("Bac/", "lzh", "BAC"),
+    # Phase 3: pre-race combination odds + training analysis + extended past races
+    "OW": ("Ow/", "zip", "OW"),    # 馬連オッズ仕様(基準オッズワイド)
+    "OU": ("Ou/", "zip", "OU"),    # 基準オッズ馬単
+    "OT": ("Ot/", "zip", "OT"),    # 基準オッズ三連複
+    "CYB": ("Cyb/", "zip", "CYB"),  # 調教分析
+    "KKA": ("Kka/", "zip", "KKA"),  # 競走馬拡張
 }
 
 

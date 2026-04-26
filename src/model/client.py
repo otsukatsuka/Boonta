@@ -19,7 +19,7 @@ class ModalClient:
         self,
         csv_data: str,
         model_name: str = "jrdb_predictor",
-        time_limit: int = 1800,
+        time_limit: int = 7200,
         presets: str = "best_quality",
     ) -> dict:
         """Start training and wait for completion."""
@@ -35,7 +35,7 @@ class ModalClient:
         self,
         csv_data: str,
         model_name: str = "jrdb_predictor",
-        time_limit: int = 1800,
+        time_limit: int = 7200,
         presets: str = "best_quality",
     ) -> str:
         """Start training asynchronously, return call_id for status polling."""
@@ -80,3 +80,35 @@ class ModalClient:
         """Get feature importance from trained model."""
         importance_fn = self._get_function("get_feature_importance")
         return importance_fn.remote(model_name=model_name)
+
+    # === Phase 2: LightGBM lambdarank ===
+
+    def train_lambdarank(
+        self,
+        csv_data: str,
+        model_name: str = "jrdb_ranker",
+        num_boost_round: int = 3000,
+        learning_rate: float = 0.05,
+        early_stopping_rounds: int = 100,
+    ) -> dict:
+        """Train the per-race ranker. Requires race_key + finish_order in CSV."""
+        train_fn = self._get_function("train_lambdarank")
+        return train_fn.remote(
+            training_data_csv=csv_data,
+            model_name=model_name,
+            num_boost_round=num_boost_round,
+            learning_rate=learning_rate,
+            early_stopping_rounds=early_stopping_rounds,
+        )
+
+    def predict_lambdarank(
+        self,
+        features: list[dict],
+        model_name: str = "jrdb_ranker",
+    ) -> dict:
+        """Get lambdarank scores + P(win)/P(top2)/P(top3) for one race."""
+        predict_fn = self._get_function("predict_lambdarank")
+        return predict_fn.remote(
+            features_json=json.dumps(features),
+            model_name=model_name,
+        )
